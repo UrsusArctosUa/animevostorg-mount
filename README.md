@@ -1,20 +1,6 @@
-DuneHD AnimeVost.org plugin
-===========================
+AnimeVost.org file system adapter (FUSE driver)
+===============================================
 
-Это базовый неофициальный плагин для приставок [DuneHD](http://dune-hd.com),
-позволяющий просматривать видео с сайта [AnimeVost.org](http://animevost.org).
+This is my first probe on Python in general and with FUSE in particular, it is not fully workable at the moment.
 
-Плагин находится в разработкt и может содержать ошибки или работать
-некорректно.
-
-Установка
-=========
-
-Для установки плагина необходимо:
-* скачайть файл [dune_plugin.zip](dune_plugin.zip)
-* скопировать файл на флешку
-* подключить флешку к приставке
-* в меню приставки перейти в раздел __Источники__=>__USB-Накопитель__
-и запустить архив для начала установки
-
-Иконка плагина должна появиться в меню __Видео__.
+This is a FUSE file system driver for site animevost.org. Main purpose is to "mount" this site as a part of file system as if it's a file system with anime serials as directories and series as files to make it possible to play movies with any player on any devise without special client. Last step should be sharing this file system via NFS.
