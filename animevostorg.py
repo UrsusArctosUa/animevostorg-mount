@@ -17,7 +17,7 @@ class Reader(object):
 
     def __init__(self):
         self.web_url = 'http://animevost.org'
-        self.api_url = 'https://api.animevost.org/animevost/api/v0.2'
+        self.api_url = 'https://api.animevost.org/v1'
 
     def list_latest(self):
         page = requests.get(self.web_url)
@@ -38,7 +38,8 @@ class Reader(object):
 
     def list_series(self, title_id):
         page = requests.post("%s/playlist" % self.api_url,
-                             {'titleid': title_id}, None)
+                             {'id': title_id}, None)
+        print
         series = json.loads(page.text)
         for item in series:
             (number, name) = item['name'].split(' ')
