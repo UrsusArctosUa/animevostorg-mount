@@ -114,6 +114,6 @@ class Operations(FuseOperations):
         return self.tree.find_by_path(path).get_content()
 
 
-def mount(mountpoint, root, name):
+def mount(mountpoint, root, name, fg):
     FUSE(Operations(root), mountpoint,
-         nothreads=True, foreground=True, fsname=name)
+         nothreads=True, foreground=fg, fsname=name)
