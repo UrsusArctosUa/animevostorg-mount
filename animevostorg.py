@@ -124,7 +124,7 @@ class Record():
         self.url = url
 
     def __str__(self):
-        return "#EXTINF:-1, %(title)s\n%(url)s\n" % {'url': self.url, 'title': self.title}
+        return "#EXTINF:-1, %(title)s\n%(url)s\n" % {'url': self.url, 'title': self.title.replace('серия', 'episode')}
     
     def __lt__(self, other):
         return int(self.title.split(' ')[0]) < int(other.title.split(' ')[0])
