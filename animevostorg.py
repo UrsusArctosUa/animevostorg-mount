@@ -6,11 +6,8 @@ Created on Oct 30, 2018
 @author: Dmytro Dubrovny <dubrovnyd@gmail.com>
 '''
 from sitefs import RootDirectory, Directory, File, CacheControl, sanitize_filename, mount
-from bs4 import BeautifulSoup
 import requests
-import regex
 import json
-import sys
 
 
 class Reader(object):
