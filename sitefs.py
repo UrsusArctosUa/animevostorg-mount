@@ -3,7 +3,10 @@ Created on Oct 30, 2018
 
 @author: Dmytro Dubrovny <dubrovnyd@gmail.com>
 '''
-from fuse import Operations as FuseOperations, FuseOSError, FUSE
+try:
+    from fusepy import Operations as FuseOperations, FuseOSError, FUSE
+except ImportError:
+    from fuse import Operations as FuseOperations, FuseOSError, FUSE
 import time
 import os
 import stat
