@@ -39,11 +39,11 @@ class Reader(object):
         std = []
         hd = []
         for item in series:
-                if 'std' in item:
-                    std.append(Record(item['name'], item['std']))
-                if 'hd' in item:
-                    hd.append(Record(item['name'], item['hd']))
-        return {'std': sorted(std), 'hd' : sorted(hd)}
+            if 'std' in item:
+                std.append(Record(item['name'], item['std']))
+            if 'hd' in item:
+                hd.append(Record(item['name'], item['hd']))
+        return {'std': sorted(std), 'hd': sorted(hd)}
 
 
 class Item():
@@ -61,7 +61,7 @@ class Root(RootDirectory):
 
 class Latest(Directory, CacheControl, Item):
 
-    def __init__(self, ttl=20):
+    def __init__(self, ttl=300):
         Directory.__init__(self, 'Latest')
         CacheControl.__init__(self, ttl)
         Item.__init__(self)
@@ -75,7 +75,7 @@ class Latest(Directory, CacheControl, Item):
 
 class Page(Directory, CacheControl, Item):
 
-    def __init__(self, page, ttl=60):
+    def __init__(self, page, ttl=300):
         Directory.__init__(self, page)
         CacheControl.__init__(self, ttl)
         Item.__init__(self)
@@ -101,7 +101,7 @@ class Title(Directory, CacheControl, Item):
         if not self.is_cached():
             series = self.reader.list_series(self.title['id'])
             self.children = [
-                Playlist('std', series['std']), Playlist('hd', series['hd']) ]
+                Playlist('std', series['std']), Playlist('hd', series['hd'])]
             self.validate_cache()
         return self.children
 
@@ -124,18 +124,32 @@ class Record():
         self.url = url
 
     def __str__(self):
-        return "#EXTINF:-1, %(title)s\n%(url)s\n" % {'url': self.url, 'title': self.title.replace('серия', 'episode')}
-    
+        return "#EXTINF:-1, %(title)s\n%(url)s\n" % {'url': self.url, 'title': self.title}
+
     def __lt__(self, other):
-        return int(self.title.split(' ')[0]) < int(other.title.split(' ')[0])
+        self_split = self.title.split(' ')[0]
+        other_split = other.title.split(' ')[0]
+        try:
+            self_num = int(self_split)
+        except ValueError:
+            try:
+                int(other_split)
+            except ValueError:
+                return self.title < other.title
+            return False
+        try:
+            other_num = int(other_split)
+        except ValueError:
+            return True
+        return int(self_num) < int(other_num)
 
 
 if __name__ == '__main__':
     import argparse
-    
+
     parser = argparse.ArgumentParser()
     parser.add_argument('target', type=str, help='Target path')
     parser.add_argument('-d', '--daemon', help='Start as daemon', action='store_true')
     options = parser.parse_args()
-    
+
     mount(options.target, Root(), 'animevostorg', not options.daemon)

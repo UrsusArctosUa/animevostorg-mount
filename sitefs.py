@@ -75,7 +75,7 @@ class File(FS):
         FS.__init__(self, name)
         self.attr = dict(st_atime=time.time(), st_ctime=time.time(), st_mtime=time.time(),
                          st_gid=os.getgid(), st_uid=os.getuid(), st_mode=stat.S_IFREG | 0o644,
-                         st_nlink=1, st_size=4096)
+                         st_nlink=1, st_size=8192)
 
 
 class Tree():
