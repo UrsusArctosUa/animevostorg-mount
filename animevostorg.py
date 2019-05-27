@@ -5,7 +5,7 @@ Created on Oct 30, 2018
 
 @author: Dmytro Dubrovny <dubrovnyd@gmail.com>
 '''
-from sitefs import RootDirectory, Directory, File, CacheControl, sanitize_filename, mount
+from sitefs import RootDirectory, Directory, File, CacheControl, sanitize_filename
 import requests
 import json
 
@@ -54,36 +54,39 @@ class Item():
 
 class Root(RootDirectory):
 
-    def __init__(self):
+    def __init__(self, quality):
         RootDirectory.__init__(self)
-        self.children = [Latest()]
+        self.quality = quality
+        self.children = [Latest(quality)]
 
 
 class Latest(Directory, CacheControl, Item):
 
-    def __init__(self, ttl=300):
-        Directory.__init__(self, 'Latest')
+    def __init__(self, quality, ttl=300):
+        Directory.__init__(self, 'latest')
         CacheControl.__init__(self, ttl)
         Item.__init__(self)
+        self.quality = quality
 
     def get_children(self):
         if not self.is_cached():
-            self.children = [Page(p) for p in self.reader.list_latest()]
+            self.children = [Page(p, self.quality) for p in self.reader.list_latest()]
             self.validate_cache()
         return self.children
 
 
 class Page(Directory, CacheControl, Item):
 
-    def __init__(self, page, ttl=300):
+    def __init__(self, page, quality, ttl=300):
         Directory.__init__(self, page)
         CacheControl.__init__(self, ttl)
         Item.__init__(self)
         self.page = int(page)
+        self.quality = quality
 
     def get_children(self):
         if not self.is_cached():
-            self.children = [Title(t)
+            self.children = [Title(t, self.quality)
                              for t in self.reader.list_titles(self.page)]
             self.validate_cache()
         return self.children
@@ -91,17 +94,20 @@ class Page(Directory, CacheControl, Item):
 
 class Title(Directory, CacheControl, Item):
 
-    def __init__(self, title, ttl=60):
+    def __init__(self, title, quality, ttl=60):
         Directory.__init__(self, title['title'])
         CacheControl.__init__(self, ttl)
         Item.__init__(self)
         self.title = title
+        self.quality = quality
 
     def get_children(self):
         if not self.is_cached():
             series = self.reader.list_series(self.title['id'])
-            self.children = [
-                Playlist('std', series['std']), Playlist('hd', series['hd'])]
+            num = 0
+            for episode in series[self.quality]:
+                self.children.append(Playlist(episode.title, series[self.quality][num:]))
+                num += 1
             self.validate_cache()
         return self.children
 
@@ -146,10 +152,18 @@ class Record():
 
 if __name__ == '__main__':
     import argparse
+    from sitefs import mount, parse_options
 
     parser = argparse.ArgumentParser()
     parser.add_argument('target', type=str, help='Target path')
-    parser.add_argument('-d', '--daemon', help='Start as daemon', action='store_true')
-    options = parser.parse_args()
+    parser.add_argument('-i', '--interactive', help='Start in interactive mode', action='store_true')
+    parser.add_argument('-o', '--options', help='Mount options')
 
-    mount(options.target, Root(), 'animevostorg', not options.daemon)
+    arguments = parser.parse_args()
+    options = parse_options(arguments.options)
+    options.setdefault('fsname', 'animevostorg')
+    options.setdefault('foreground', arguments.interactive)
+
+    root = Root(options['quality'])
+    del options['quality']
+    mount(root, arguments.target, **options)

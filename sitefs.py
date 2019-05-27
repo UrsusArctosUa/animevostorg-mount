@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 '''
 Created on Oct 30, 2018
 
@@ -117,6 +119,42 @@ class Operations(FuseOperations):
         return self.tree.find_by_path(path).get_content()
 
 
-def mount(mountpoint, root, name, fg):
-    FUSE(Operations(root), mountpoint,
-         nothreads=True, foreground=fg, fsname=name)
+def mount(root, mountpoint, **kwargs):
+    kwargs.setdefault('nothreads', True)
+    kwargs.setdefault('allow_other', True)
+
+    FUSE(Operations(root), mountpoint, **kwargs)
+
+def parse_options(options_s):
+    options_d = {}
+    for option_s in options_s.split(','):
+        option_l = option_s.split('=')
+        if len(option_l) == 2:
+            options_d[option_l[0]] = option_l[1]
+        else:
+            options_d[option_l[0]] = True
+    return options_d
+
+
+if __name__ == '__main__':
+    import argparse
+    import importlib
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument('site', type=str, help='Site name or alias')
+    parser.add_argument('path', type=str, help='Target path')
+    parser.add_argument('-i', '--interactive', help='Mount in interactive mode', action='store_true')
+    parser.add_argument('-o', '--options', help='Mount options')
+    parser.add_argument('-d', '--daemon', help='Start as daemon', action='store_true')
+
+    sites = {'animevost': 'animevostorg', 'animevostorg': 'animevostorg'}
+
+    arguments = parser.parse_args()
+    options = parse_options(arguments.options)
+    options.setdefault('fsname', sites[arguments.site])
+    options.setdefault('foreground', arguments.interactive)
+    options.setdefault('quality', 'hd')
+
+    root = getattr(importlib.import_module(sites[arguments.site]), 'Root')(options['quality'])
+    del options['quality']
+    mount(root, arguments.path, **options)
