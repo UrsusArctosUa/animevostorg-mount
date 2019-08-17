@@ -14,16 +14,17 @@ class Reader(object):
 
     def __init__(self):
         self.api_url = 'https://api.animevost.org/v1'
-        self.quantity = 24
+        self.quantity = 99
 
-    def list_latest(self):
-        page = requests.get("%s/last?page=1&quantity=1" % (self.api_url))
+    def get_pages(self):
+        page = requests.get("%s/last?page=1&quantity=%d" % (self.api_url, self.quantity))
         series = json.loads(page.text)
-        index = 0
+        if len(series['data']) < self.quantity:
+            self.quantity = len(series['data'])
         max_page = series['state']['count'] // self.quantity + 1
         return ["%03d" % page for page in range(1, max_page)]
 
-    def list_titles(self, page):
+    def get_titles(self, page):
         page = requests.get("%s/last?page=%d&quantity=%d" % (self.api_url, page, self.quantity))
         series = json.loads(page.text)
         index = 0
@@ -32,7 +33,7 @@ class Reader(object):
             title = {'title': "%02d %s" % (index, sanitize_filename(s['title'])), 'id': s['id']}
             yield title
 
-    def list_series(self, title_id):
+    def get_series(self, title_id):
         page = requests.post("%s/playlist" % self.api_url,
                              {'id': title_id}, None)
         series = json.loads(page.text)
@@ -57,7 +58,7 @@ class Root(RootDirectory):
     def __init__(self, quality):
         RootDirectory.__init__(self)
         self.quality = quality
-        self.children = [Latest(quality)]
+        self.children = [Latest(quality), All(quality)]
 
 
 class Latest(Directory, CacheControl, Item):
@@ -70,7 +71,22 @@ class Latest(Directory, CacheControl, Item):
 
     def get_children(self):
         if not self.is_cached():
-            self.children = [Page(p, self.quality) for p in self.reader.list_latest()]
+            self.children = [Title(t, self.quality) for t in self.reader.get_titles(1)]
+            self.validate_cache()
+        return self.children
+
+
+class All(Directory, CacheControl, Item):
+
+    def __init__(self, quality, ttl=300):
+        Directory.__init__(self, 'all')
+        CacheControl.__init__(self, ttl)
+        Item.__init__(self)
+        self.quality = quality
+
+    def get_children(self):
+        if not self.is_cached():
+            self.children = [Page(p, self.quality) for p in self.reader.get_pages()]
             self.validate_cache()
         return self.children
 
@@ -86,8 +102,7 @@ class Page(Directory, CacheControl, Item):
 
     def get_children(self):
         if not self.is_cached():
-            self.children = [Title(t, self.quality)
-                             for t in self.reader.list_titles(self.page)]
+            self.children = [Title(t, self.quality) for t in self.reader.get_titles(self.page)]
             self.validate_cache()
         return self.children
 
@@ -103,7 +118,7 @@ class Title(Directory, CacheControl, Item):
 
     def get_children(self):
         if not self.is_cached():
-            series = self.reader.list_series(self.title['id'])
+            series = self.reader.get_series(self.title['id'])
             num = 0
             for episode in series[self.quality]:
                 self.children.append(Playlist(episode.title, series[self.quality][num:]))
@@ -163,6 +178,7 @@ if __name__ == '__main__':
     options = parse_options(arguments.options)
     options.setdefault('fsname', 'animevostorg')
     options.setdefault('foreground', arguments.interactive)
+    options.setdefault('quality', 'hd')
 
     root = Root(options['quality'])
     del options['quality']
