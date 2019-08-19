@@ -5,6 +5,7 @@ Created on Oct 30, 2018
 
 @author: Dmytro Dubrovny <dubrovnyd@gmail.com>
 '''
+
 try:
     from fusepy import Operations as FuseOperations, FuseOSError, FUSE
 except ImportError:
@@ -19,104 +20,78 @@ def sanitize_filename(filename):
     return filename.replace('/', "\u2571")
 
 
-class CacheControl():
-    def __init__(self, ttl):
-        self.cache = {'ttl': ttl, 'time': 0}
+class Directory(object):
+    def __init__(self, name: str, children: list):
+        self.name = name
+        self._children = children
+        self.defaults = ['.', '..']
 
-    def is_cached(self):
-        return time.time() - self.cache['time'] < self.cache['ttl']
+    @property
+    def attr(self) -> dict:
+        attr = dict(st_atime=time.time(), st_ctime=time.time(), st_mtime=time.time(), st_gid=os.getgid(),
+                 st_uid=os.getuid(), st_mode=stat.S_IFDIR | 0o555, st_nlink=1, st_size=4096)
+        return attr
 
-    def validate_cache(self, ttl=None):
-        if ttl != None:
-            self.cache['ttl'] = ttl
-        self.cache['time'] = time.time()
+    @property
+    def children(self) -> list:
+        return self._children
 
-    def invalidate_cache(self):
-        self.cache['time'] = 0
+    def list(self) -> list:
+        return self.defaults + [child.name for child in self.children]
+
+    def find(self, path: str):
+        if path == '':
+            return self
+
+        split = path.split(os.sep)
+        filename = split.pop(0)
+        for child in self.children:
+            if child.name == filename:
+                item = child.find(os.sep.join(split))
+                return item
+
+        raise FuseOSError(errno.ENOENT)
 
 
-class FS(object):
+class File(object):
     def __init__(self, name):
         self.name = name
-        self.attr = None
 
-    def get_attr(self):
-        return self.attr
+    @property
+    def attr(self) -> dict:
+        length = len(self.content.encode('UTF8'))
+        attr = dict(st_atime=time.time(), st_ctime=time.time(), st_mtime=time.time(), st_gid=os.getgid(),
+                 st_uid=os.getuid(), st_mode=stat.S_IFREG | 0o444, st_nlink=1, st_size=length)
+        return attr
 
-    def get_name(self):
-        return self.name
+    @property
+    def content(self) -> str:
+        return ''
 
-    def get_content(self):
-        pass
+    def find(self, path: str):
+        if path == '':
+            return self
+        else:
+            raise FuseOSError(errno.ENOTDIR)
 
-
-class Directory(FS):
-
-    def __init__(self, name):
-        FS.__init__(self, name)
-        self.attr = dict(st_atime=time.time(), st_ctime=time.time(), st_mtime=time.time(),
-                         st_gid=os.getgid(), st_uid=os.getuid(), st_mode=stat.S_IFDIR | 0o755,
-                         st_nlink=2, st_size=4096)
-        self.default_content = ['.', '..']
-        self.children = []
-
-    def get_children(self):
-        return self.children
-
-    def get_content(self):
-        return self.default_content + [c.get_name() for c in self.get_children()]
-
-
-class RootDirectory(Directory):
-    def __init__(self):
-        Directory.__init__(self, '')
-
-
-class File(FS):
-    def __init__(self, name):
-        FS.__init__(self, name)
-        self.attr = dict(st_atime=time.time(), st_ctime=time.time(), st_mtime=time.time(),
-                         st_gid=os.getgid(), st_uid=os.getuid(), st_mode=stat.S_IFREG | 0o644,
-                         st_nlink=1, st_size=8192)
-
-
-class Tree():
-    def __init__(self, root):
-        self.children = [root]
-
-    def get_children(self):
-        return self.children
-
-    def find_by_path(self, path):
-        splited_path = path.rstrip('/').split('/')
-
-        item = self
-        for name in splited_path:
-            dirs = item.get_children()
-            for d in dirs:
-                if d.get_name() == name:
-                    item = d
-                    break
-            else:
-                raise FuseOSError(errno.ENOENT)
-
-        return item
+    def read(self):
+        return self.content.encode()
 
 
 class Operations(FuseOperations):
 
-    def __init__(self, root):
+    def __init__(self, root: Directory):
         FuseOperations.__init__(self)
-        self.tree = Tree(root)
+        self.root = root
 
-    def getattr(self, path, fh=None):
-        return self.tree.find_by_path(path).get_attr()
+    def getattr(self, path: str, fh=None):
+        return self.root.find(path.lstrip(os.sep)).attr
 
-    def readdir(self, path, fh):
-        return self.tree.find_by_path(path).get_content()
+    def readdir(self, path: str, fh):
+        return self.root.find(path.lstrip(os.sep)).list()
 
-    def read(self, path, size, offset, fh):
-        return self.tree.find_by_path(path).get_content()
+    def read(self, path: str, size, offset, fh):
+        return self.root.find(path.lstrip(os.sep)).read()
 
 
 def mount(root, mountpoint, **kwargs):
@@ -124,6 +99,7 @@ def mount(root, mountpoint, **kwargs):
     kwargs.setdefault('allow_other', True)
 
     FUSE(Operations(root), mountpoint, **kwargs)
+
 
 def parse_options(options_s):
     options_d = {}
@@ -134,27 +110,3 @@ def parse_options(options_s):
         else:
             options_d[option_l[0]] = True
     return options_d
-
-
-if __name__ == '__main__':
-    import argparse
-    import importlib
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument('site', type=str, help='Site name or alias')
-    parser.add_argument('path', type=str, help='Target path')
-    parser.add_argument('-i', '--interactive', help='Mount in interactive mode', action='store_true')
-    parser.add_argument('-o', '--options', help='Mount options')
-    parser.add_argument('-d', '--daemon', help='Start as daemon', action='store_true')
-
-    sites = {'animevost': 'animevostorg', 'animevostorg': 'animevostorg'}
-
-    arguments = parser.parse_args()
-    options = parse_options(arguments.options)
-    options.setdefault('fsname', sites[arguments.site])
-    options.setdefault('foreground', arguments.interactive)
-    options.setdefault('quality', 'hd')
-
-    root = getattr(importlib.import_module(sites[arguments.site]), 'Root')(options['quality'])
-    del options['quality']
-    mount(root, arguments.path, **options)

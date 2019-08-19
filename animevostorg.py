@@ -5,9 +5,10 @@ Created on Oct 30, 2018
 
 @author: Dmytro Dubrovny <dubrovnyd@gmail.com>
 '''
-from sitefs import RootDirectory, Directory, File, CacheControl, sanitize_filename
+from sitefs import Directory, File, sanitize_filename
 import requests
 import json
+import time
 
 
 class Reader(object):
@@ -53,78 +54,98 @@ class Item():
         self.reader = Reader()
 
 
-class Root(RootDirectory):
+class Root(Directory):
 
     def __init__(self, quality):
-        RootDirectory.__init__(self)
+        Directory.__init__(self, '', [Latest(quality, CacheControl(6000)), All(quality, CacheControl(6000))])
         self.quality = quality
-        self.children = [Latest(quality), All(quality)]
 
 
-class Latest(Directory, CacheControl, Item):
+class CacheControl():
+    def __init__(self, ttl):
+        self.cache = {'ttl': ttl, 'time': 0}
 
-    def __init__(self, quality, ttl=300):
-        Directory.__init__(self, 'latest')
-        CacheControl.__init__(self, ttl)
+    def is_valid(self):
+        return time.time() - self.cache['time'] < self.cache['ttl']
+
+    def validate(self, ttl=None):
+        if ttl != None:
+            self.cache['ttl'] = ttl
+        self.cache['time'] = time.time()
+
+    def invalidate(self):
+        self.cache['time'] = 0
+
+
+class Latest(Directory, Item):
+
+    def __init__(self, quality: str, cache: CacheControl):
+        Directory.__init__(self, 'latest', [])
+        self.cache = cache
         Item.__init__(self)
         self.quality = quality
 
-    def get_children(self):
-        if not self.is_cached():
-            self.children = [Title(t, self.quality) for t in self.reader.get_titles(1)]
-            self.validate_cache()
-        return self.children
+    @property
+    def children(self):
+        if not self.cache.is_valid():
+            self._children = [Title(t, self.quality, CacheControl(6000)) for t in self.reader.get_titles(1)]
+            self.cache.validate()
+        return self._children
 
 
-class All(Directory, CacheControl, Item):
+class All(Directory, Item):
 
-    def __init__(self, quality, ttl=300):
-        Directory.__init__(self, 'all')
-        CacheControl.__init__(self, ttl)
+    def __init__(self, quality: str, cache: CacheControl):
+        Directory.__init__(self, 'all', [])
+        self.cache = cache
         Item.__init__(self)
         self.quality = quality
 
-    def get_children(self):
-        if not self.is_cached():
-            self.children = [Page(p, self.quality) for p in self.reader.get_pages()]
-            self.validate_cache()
-        return self.children
+    @property
+    def children(self):
+        if not self.cache.is_valid():
+            self._children = [Page(p, self.quality, CacheControl(6000)) for p in self.reader.get_pages()]
+            self.cache.validate()
+        return self._children
 
 
-class Page(Directory, CacheControl, Item):
+class Page(Directory, Item):
 
-    def __init__(self, page, quality, ttl=300):
-        Directory.__init__(self, page)
-        CacheControl.__init__(self, ttl)
+    def __init__(self, page, quality: str, cache: CacheControl):
+        Directory.__init__(self, page, [])
+        self.cache = cache
         Item.__init__(self)
         self.page = int(page)
         self.quality = quality
 
-    def get_children(self):
-        if not self.is_cached():
-            self.children = [Title(t, self.quality) for t in self.reader.get_titles(self.page)]
-            self.validate_cache()
-        return self.children
+    @property
+    def children(self):
+        if not self.cache.is_valid():
+            self._children = [Title(t, self.quality, CacheControl(6000)) for t in self.reader.get_titles(self.page)]
+            self.cache.validate()
+        return self._children
 
 
-class Title(Directory, CacheControl, Item):
+class Title(Directory, Item):
 
-    def __init__(self, title, quality, ttl=60):
-        Directory.__init__(self, title['title'])
-        CacheControl.__init__(self, ttl)
+    def __init__(self, title, quality: str, cache: CacheControl):
+        Directory.__init__(self, title['title'], [])
+        self.cache = cache
         Item.__init__(self)
         self.title = title
         self.quality = quality
 
-    def get_children(self):
-        if not self.is_cached():
+    @property
+    def children(self):
+        if not self.cache.is_valid():
             series = self.reader.get_series(self.title['id'])
             num = 0
+            self._children = []
             for episode in series[self.quality]:
-                self.children.append(Playlist(episode.title, series[self.quality][num:]))
+                self._children.append(Playlist(episode.title, series[self.quality][num:]))
                 num += 1
-            self.validate_cache()
-        return self.children
+            self.cache.validate()
+        return self._children
 
 
 class Playlist(File, Item):
@@ -134,8 +155,9 @@ class Playlist(File, Item):
         self.records = records
         self.title = title
 
-    def get_content(self):
-        return str.encode("#EXTM3U\n" + "\n".join(str(s) for s in self.records))
+    @property
+    def content(self):
+        return "#EXTM3U\n" + "\n".join(str(s) for s in self.records)
 
 
 class Record():
@@ -170,16 +192,17 @@ if __name__ == '__main__':
     from sitefs import mount, parse_options
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('target', type=str, help='Target path')
+    parser.add_argument('name', type=str, help='FS name, needed for fstab')
+    parser.add_argument('path', type=str, help='Target path')
     parser.add_argument('-i', '--interactive', help='Start in interactive mode', action='store_true')
-    parser.add_argument('-o', '--options', help='Mount options')
+    parser.add_argument('-o', '--options', help='Mount options', default='')
 
     arguments = parser.parse_args()
     options = parse_options(arguments.options)
-    options.setdefault('fsname', 'animevostorg')
+    options.setdefault('fsname', arguments.name)
     options.setdefault('foreground', arguments.interactive)
     options.setdefault('quality', 'hd')
 
     root = Root(options['quality'])
     del options['quality']
-    mount(root, arguments.target, **options)
+    mount(root, arguments.path, **options)
