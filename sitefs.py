@@ -21,52 +21,55 @@ def sanitize_filename(filename):
 
 
 class Directory(object):
-    def __init__(self, name: str, children: list):
+    def __init__(self, name: str, items):
         self.name = name
-        self._children = children
+        self._items = items
         self.defaults = ['.', '..']
 
     @property
     def attr(self) -> dict:
         attr = dict(st_atime=time.time(), st_ctime=time.time(), st_mtime=time.time(), st_gid=os.getgid(),
-                 st_uid=os.getuid(), st_mode=stat.S_IFDIR | 0o555, st_nlink=1, st_size=4096)
+                    st_uid=os.getuid(), st_mode=stat.S_IFDIR | 0o555, st_nlink=1, st_size=4096)
         return attr
 
     @property
-    def children(self) -> list:
-        return self._children
+    def items(self) -> list:
+        return self._items
 
     def list(self) -> list:
-        return self.defaults + [child.name for child in self.children]
+        return self.defaults + [str(item) for item in self.items]
 
     def find(self, path: str):
         if path == '':
             return self
 
         split = path.split(os.sep)
-        filename = split.pop(0)
-        for child in self.children:
-            if child.name == filename:
-                item = child.find(os.sep.join(split))
+        name = split.pop(0)
+        for item in self.items:
+            if str(item) == name:
+                item = item.find(os.sep.join(split))
                 return item
 
         raise FuseOSError(errno.ENOENT)
 
+    def __str__(self):
+        return self.name
+
 
 class File(object):
-    def __init__(self, name):
+    def __init__(self, name: str, content: str = ''):
         self.name = name
+        self.__content = content
 
     @property
     def attr(self) -> dict:
-        length = len(self.content.encode('UTF8'))
         attr = dict(st_atime=time.time(), st_ctime=time.time(), st_mtime=time.time(), st_gid=os.getgid(),
-                 st_uid=os.getuid(), st_mode=stat.S_IFREG | 0o444, st_nlink=1, st_size=length)
+                    st_uid=os.getuid(), st_mode=stat.S_IFREG | 0o444, st_nlink=1, st_size=len(self.read()))
         return attr
 
     @property
     def content(self) -> str:
-        return ''
+        return self.__content
 
     def find(self, path: str):
         if path == '':
@@ -74,8 +77,21 @@ class File(object):
         else:
             raise FuseOSError(errno.ENOTDIR)
 
-    def read(self):
+    def read(self) -> bytes:
         return self.content.encode()
+
+    def __str__(self):
+        return self.name
+
+
+class Playlist(File):
+    def __init__(self, name: str, items):
+        File.__init__(self, "%s.m3u8" % name)
+        self.items = items
+
+    @property
+    def content(self):
+        return "#EXTM3U\n" + "\n".join(str(item) for item in self.items)
 
 
 class Operations(FuseOperations):
