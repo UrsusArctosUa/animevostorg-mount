@@ -22,7 +22,7 @@ def sanitize_filename(filename):
 class File:
 
     def __init__(self, name: str, content: str = ''):
-        self.name = name
+        self.__name = name
         self.__content = content
 
     @property
@@ -31,10 +31,6 @@ class File:
                     st_uid=os.getuid(), st_mode=stat.S_IFREG | 0o444, st_nlink=1, st_size=len(self.read()))
         return attr
 
-    @property
-    def content(self) -> str:
-        return self.__content
-
     def find(self, path: str):
         if path == '':
             return self
@@ -42,10 +38,10 @@ class File:
             raise FuseOSError(errno.ENOTDIR)
 
     def read(self) -> bytes:
-        return self.content.encode()
+        return self.__content.encode()
 
     def __str__(self) -> str:
-        return sanitize_filename(self.name)
+        return sanitize_filename(self.__name)
 
 
 class Directory:
@@ -53,7 +49,7 @@ class Directory:
     def __init__(self, name: str, items: Iterable):
         self.__name = name
         self.__items = items
-        self.defaults = ['.', '..']
+        self.__defaults = ['.', '..']
 
     @property
     def attr(self) -> dict:
@@ -61,32 +57,24 @@ class Directory:
                     st_uid=os.getuid(), st_mode=stat.S_IFDIR | 0o555, st_nlink=1, st_size=4096)
         return attr
 
-    @property
-    def items(self) -> Iterable:
-        return self.__items
-
-    @property
-    def name(self) -> str:
-        return self.__name
-
-    def list(self) -> List[str]:
-        return self.defaults + [str(item) for item in self.items]
-
     def find(self, path: str):
         if path == '':
             return self
 
         split = path.split(os.sep)
         name = split.pop(0)
-        for item in self.items:
+        for item in self.__items:
             if str(item) == name:
                 item = item.find(os.sep.join(split))
                 return item
 
         raise FuseOSError(errno.ENOENT)
 
+    def list(self) -> List[str]:
+        return self.__defaults + [str(item) for item in self.__items]
+
     def __str__(self) -> str:
-        return sanitize_filename(self.name)
+        return sanitize_filename(self.__name)
 
 
 class PlaylistItem:
@@ -96,15 +84,11 @@ class PlaylistItem:
         self.__url = url
 
     def __str__(self):
-        return "#EXTINF:-1, %(title)s\n%(url)s\n" % {'url': self.url, 'title': self.title}
+        return "#EXTINF:-1, %(title)s\n%(url)s\n" % {'url': self.__url, 'title': self.__title}
 
     @property
     def title(self) -> str:
         return self.__title
-
-    @property
-    def url(self) -> str:
-        return self.__url
 
 
 class Playlist(File):
@@ -113,13 +97,8 @@ class Playlist(File):
         File.__init__(self, "%s.m3u8" % name)
         self.__items = items
 
-    @property
-    def items(self) -> Iterable[PlaylistItem]:
-        return self.__items
-
-    @property
-    def content(self) -> str:
-        return "#EXTM3U\n" + "\n".join(str(item) for item in self.items)
+    def read(self) -> bytes:
+        return ("#EXTM3U\n" + "\n".join(str(item) for item in self.__items)).encode()
 
 
 class Operations(FuseOperations):

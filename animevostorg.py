@@ -19,7 +19,7 @@ class Episode(PlaylistItem):
     def __init__(self, title, url):
         PlaylistItem.__init__(self, title, url)
 
-    def __lt__(self, other):
+    def __lt__(self, other: 'Episode'):
         self_split = self.title.split(' ')[0]
         other_split = other.title.split(' ')[0]
         try:
@@ -48,25 +48,16 @@ class Title:
         self.__quality = quality
 
     def __iter__(self):
-        return iter(self.playlist)
+        return iter(self.__playlist())
 
-    @property
-    def title_id(self):
-        return self.__title_id
-
-    @property
-    def quality(self):
-        return self.__quality
-
-    @property
     @cached(cache=TTLCache(maxsize=1024, ttl=3000))
-    def playlist(self) -> List[Playlist]:
-        page = requests.post("%s/playlist" % API_URL, {'id': self.title_id}, None)
+    def __playlist(self) -> List[Playlist]:
+        page = requests.post("%s/playlist" % API_URL, {'id': self.__title_id}, None)
         series_data = json.loads(page.text)
         series = []
         for episode_data in series_data:
-            if self.quality in episode_data and requests.head(episode_data[self.quality]).ok:
-                series.append(Episode(episode_data['name'], episode_data[self.quality]))
+            if self.__quality in episode_data and requests.head(episode_data[self.__quality]).ok:
+                series.append(Episode(episode_data['name'], episode_data[self.__quality]))
             else:
                 for quality in Episode.qualities():
                     if quality in episode_data and requests.head(episode_data[quality]).ok:
@@ -84,44 +75,42 @@ class Title:
 class Page:
 
     def __init__(self, number: int, quality: str, limit: int = 99):
-        self.number = number
-        self.limit = limit
-        self.quality = quality
+        self.__number = number
+        self.__limit = limit
+        self.__quality = quality
 
     def __iter__(self) -> Iterator[Directory]:
-        return iter(self.titles)
+        return iter(self.__titles())
 
-    @property
     @cached(cache=TTLCache(maxsize=1024, ttl=3000))
-    def titles(self) -> List[Directory]:
-        page = requests.get("%s/last?page=%d&quantity=%d" % (API_URL, self.number, self.limit))
+    def __titles(self) -> List[Directory]:
+        page = requests.get("%s/last?page=%d&quantity=%d" % (API_URL, self.__number, self.__limit))
         series = json.loads(page.text)
         index = 0
         titles = []
         for s in series['data']:
             index += 1
-            titles.append(Directory("%02d %s" % (index, s['title']), Title(s['id'], self.quality)))
+            titles.append(Directory("%02d %s" % (index, s['title']), Title(s['id'], self.__quality)))
         return titles
 
 
 class AllPages:
 
     def __init__(self, quality: str):
-        self.limit = 99
-        self.quality = quality
+        self.__limit = 99
+        self.__quality = quality
 
     def __iter__(self) -> Iterator[Directory]:
-        return iter(self.pages)
+        return iter(self.__pages())
 
-    @property
     @cached(cache=TTLCache(maxsize=1024, ttl=3000))
-    def pages(self) -> List[Directory]:
-        page = requests.get("%s/last?page=1&quantity=%d" % (API_URL, self.limit))
+    def __pages(self) -> List[Directory]:
+        page = requests.get("%s/last?page=1&quantity=%d" % (API_URL, self.__limit))
         series = json.loads(page.text)
-        if len(series['data']) < self.limit:
-            self.limit = len(series['data'])
-        max_page = series['state']['count'] // self.limit + 1
-        pages = [Directory("%03d" % page, Page(page, self.quality, self.limit)) for page in range(1, max_page)]
+        if len(series['data']) < self.__limit:
+            self.__limit = len(series['data'])
+        max_page = series['state']['count'] // self.__limit + 1
+        pages = [Directory("%03d" % page, Page(page, self.__quality, self.__limit)) for page in range(1, max_page)]
         return pages
 
 
