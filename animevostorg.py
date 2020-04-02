@@ -5,22 +5,19 @@ Created on Oct 30, 2018
 
 @author: Dmytro Dubrovny <dubrovnyd@gmail.com>
 '''
-from sitefs import Directory, Playlist, sanitize_filename
-import requests
-import json
-import time
+
+from sitefs import Directory, Playlist, PlaylistItem
+from typing import List, Iterator
+from cachetools import cached, TTLCache
+import requests, json
 
 API_URL = 'https://api.animevost.org/v1'
 
 
-class Episode(object):
+class Episode(PlaylistItem):
 
     def __init__(self, title, url):
-        self.title = title
-        self.url = url
-
-    def __str__(self):
-        return "#EXTINF:-1, %(title)s\n%(url)s\n" % {'url': self.url, 'title': self.title}
+        PlaylistItem.__init__(self, title, url)
 
     def __lt__(self, other):
         self_split = self.title.split(' ')[0]
@@ -39,123 +36,110 @@ class Episode(object):
             return True
         return int(self_num) < int(other_num)
 
-
-class Cached(object):
-
-    def __init__(self, ttl: int):
-        self.__ttl = ttl
-        self.__updated_at = 0
-
-    def is_valid(self):
-        return time.time() - self.__updated_at < self.__ttl
-
-    def validate(self):
-        self.__updated_at = time.time()
-
-    def invalidate(self):
-        self.__updated_at = 0
+    @staticmethod
+    def qualities() -> List[str]:
+        return ['std', 'hd']
 
 
-class Title(Cached):
+class Title:
 
-    def __init__(self, id: int, quality: str, ttl: int = 3000):
-        Cached.__init__(self, ttl)
-        self.id = id
-        self.quality = quality
+    def __init__(self, title_id: int, quality: str):
+        self.__title_id = title_id
+        self.__quality = quality
 
     def __iter__(self):
-        if not self.is_valid():
-            self.__update()
+        return iter(self.playlist)
 
-        return iter(self.__playlist)
+    @property
+    def title_id(self):
+        return self.__title_id
 
-    def __update(self):
-        page = requests.post("%s/playlist" % API_URL, {'id': self.id}, None)
-        series = json.loads(page.text)
-        std = []
-        hd = []
-        for item in series:
-            if 'std' in item:
-                std.append(Episode(item['name'], item['std']))
-            if 'hd' in item:
-                hd.append(Episode(item['name'], item['hd']))
-        self.__series = {'std': sorted(std), 'hd': sorted(hd)}
-        self.__playlist = []
+    @property
+    def quality(self):
+        return self.__quality
+
+    @property
+    @cached(cache=TTLCache(maxsize=1024, ttl=3000))
+    def playlist(self) -> List[Playlist]:
+        page = requests.post("%s/playlist" % API_URL, {'id': self.title_id}, None)
+        series_data = json.loads(page.text)
+        series = []
+        for episode_data in series_data:
+            if self.quality in episode_data and requests.head(episode_data[self.quality]).ok:
+                series.append(Episode(episode_data['name'], episode_data[self.quality]))
+            else:
+                for quality in Episode.qualities():
+                    if quality in episode_data and requests.head(episode_data[quality]).ok:
+                        series.append(Episode(episode_data['name'], episode_data[quality]))
+                        break
+                pass
+        playlist = []
         num = 0
-        for episode in self.__series[self.quality]:
-            self.__playlist.append(Playlist(episode.title, self.__series[self.quality][num:]))
+        for episode in sorted(series):
+            playlist.append(Playlist(episode.title, series[num:]))
             num += 1
-        self.validate()
+        return playlist
 
 
-class Page(Cached):
+class Page:
 
-    def __init__(self, number: int, quality: str, limit: int = 99, ttl: int = 3000):
-        Cached.__init__(self, ttl)
+    def __init__(self, number: int, quality: str, limit: int = 99):
         self.number = number
         self.limit = limit
         self.quality = quality
 
-    def __iter__(self):
-        if not self.is_valid():
-            self.__update()
-        return iter(self.__titles)
+    def __iter__(self) -> Iterator[Directory]:
+        return iter(self.titles)
 
-    def __update(self):
+    @property
+    @cached(cache=TTLCache(maxsize=1024, ttl=3000))
+    def titles(self) -> List[Directory]:
         page = requests.get("%s/last?page=%d&quantity=%d" % (API_URL, self.number, self.limit))
         series = json.loads(page.text)
         index = 0
-        self.__titles = []
+        titles = []
         for s in series['data']:
             index += 1
-            self.__titles.append(
-                Directory("%02d %s" % (index, sanitize_filename(s['title'])), Title(s['id'], self.quality)))
-        self.validate()
+            titles.append(Directory("%02d %s" % (index, s['title']), Title(s['id'], self.quality)))
+        return titles
 
 
-class All(Cached):
+class AllPages:
 
-    def __init__(self, quality: str, ttl: int = 3000):
-        Cached.__init__(self, ttl)
+    def __init__(self, quality: str):
         self.limit = 99
         self.quality = quality
 
-    def __iter__(self):
-        if not self.is_valid():
-            self.__update()
-        return iter(self.__pages)
+    def __iter__(self) -> Iterator[Directory]:
+        return iter(self.pages)
 
-    def __update(self):
+    @property
+    @cached(cache=TTLCache(maxsize=1024, ttl=3000))
+    def pages(self) -> List[Directory]:
         page = requests.get("%s/last?page=1&quantity=%d" % (API_URL, self.limit))
         series = json.loads(page.text)
         if len(series['data']) < self.limit:
             self.limit = len(series['data'])
         max_page = series['state']['count'] // self.limit + 1
-        self.__pages = [Directory("%03d" % page, Page(page, self.quality, self.limit)) for page in range(1, max_page)]
-        self.validate()
+        pages = [Directory("%03d" % page, Page(page, self.quality, self.limit)) for page in range(1, max_page)]
+        return pages
 
 
-def make_root(quality):
-    return Directory('', [Directory('latest', Page(1, quality)), Directory('all', All(quality))])
+class Root(Directory):
+
+    def __init__(self, quality: str):
+        Directory.__init__(self, '', [Directory('latest', Page(1, quality)), Directory('all', AllPages(quality))])
 
 
 if __name__ == '__main__':
-    import argparse
-    from sitefs import mount, parse_options
+    from sitefs import mount, parse_options, argument_parser
 
-    parser = argparse.ArgumentParser()
-    parser.add_argument('name', type=str, help='FS name, needed for fstab')
+    parser = argument_parser()
+    parser.add_argument('quality', type=str, help='Video quality', choices=Episode.qualities())
     parser.add_argument('path', type=str, help='Target path')
-    parser.add_argument('-i', '--interactive', help='Start in interactive mode', action='store_true')
-    parser.add_argument('-o', '--options', help='Mount options', default='')
-    parser.add_argument('-q', '--quality', help='Video quality', default='hd')
 
     arguments = parser.parse_args()
-    options = parse_options(arguments.options)
-    options.setdefault('fsname', arguments.name)
-    options.setdefault('foreground', arguments.interactive)
-    options.setdefault('quality', arguments.quality)
+    options = parse_options(arguments)
+    options.setdefault('fsname', "animevostorg_%s" % arguments.quality)
 
-    root = make_root(quality=options['quality'])
-    del options['quality']
-    mount(root, arguments.path, **options)
+    mount(Root(arguments.quality), arguments.path, **options)

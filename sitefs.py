@@ -10,53 +10,17 @@ try:
     from fusepy import Operations as FuseOperations, FuseOSError, FUSE
 except ImportError:
     from fuse import Operations as FuseOperations, FuseOSError, FUSE
-import time
-import os
-import stat
-import errno
+from typing import Iterable, List
+from argparse import ArgumentParser
+import time, os, stat, errno
 
 
 def sanitize_filename(filename):
     return filename.replace('/', "\u2571")
 
 
-class Directory(object):
-    def __init__(self, name: str, items):
-        self.name = name
-        self._items = items
-        self.defaults = ['.', '..']
+class File:
 
-    @property
-    def attr(self) -> dict:
-        attr = dict(st_atime=time.time(), st_ctime=time.time(), st_mtime=time.time(), st_gid=os.getgid(),
-                    st_uid=os.getuid(), st_mode=stat.S_IFDIR | 0o555, st_nlink=1, st_size=4096)
-        return attr
-
-    @property
-    def items(self) -> list:
-        return self._items
-
-    def list(self) -> list:
-        return self.defaults + [str(item) for item in self.items]
-
-    def find(self, path: str):
-        if path == '':
-            return self
-
-        split = path.split(os.sep)
-        name = split.pop(0)
-        for item in self.items:
-            if str(item) == name:
-                item = item.find(os.sep.join(split))
-                return item
-
-        raise FuseOSError(errno.ENOENT)
-
-    def __str__(self):
-        return self.name
-
-
-class File(object):
     def __init__(self, name: str, content: str = ''):
         self.name = name
         self.__content = content
@@ -80,17 +44,81 @@ class File(object):
     def read(self) -> bytes:
         return self.content.encode()
 
+    def __str__(self) -> str:
+        return sanitize_filename(self.name)
+
+
+class Directory:
+
+    def __init__(self, name: str, items: Iterable):
+        self.__name = name
+        self.__items = items
+        self.defaults = ['.', '..']
+
+    @property
+    def attr(self) -> dict:
+        attr = dict(st_atime=time.time(), st_ctime=time.time(), st_mtime=time.time(), st_gid=os.getgid(),
+                    st_uid=os.getuid(), st_mode=stat.S_IFDIR | 0o555, st_nlink=1, st_size=4096)
+        return attr
+
+    @property
+    def items(self) -> Iterable:
+        return self.__items
+
+    @property
+    def name(self) -> str:
+        return self.__name
+
+    def list(self) -> List[str]:
+        return self.defaults + [str(item) for item in self.items]
+
+    def find(self, path: str):
+        if path == '':
+            return self
+
+        split = path.split(os.sep)
+        name = split.pop(0)
+        for item in self.items:
+            if str(item) == name:
+                item = item.find(os.sep.join(split))
+                return item
+
+        raise FuseOSError(errno.ENOENT)
+
+    def __str__(self) -> str:
+        return sanitize_filename(self.name)
+
+
+class PlaylistItem:
+
+    def __init__(self, title: str, url: str):
+        self.__title = title
+        self.__url = url
+
     def __str__(self):
-        return self.name
+        return "#EXTINF:-1, %(title)s\n%(url)s\n" % {'url': self.url, 'title': self.title}
+
+    @property
+    def title(self) -> str:
+        return self.__title
+
+    @property
+    def url(self) -> str:
+        return self.__url
 
 
 class Playlist(File):
-    def __init__(self, name: str, items):
+
+    def __init__(self, name: str, items: Iterable[PlaylistItem]):
         File.__init__(self, "%s.m3u8" % name)
-        self.items = items
+        self.__items = items
 
     @property
-    def content(self):
+    def items(self) -> Iterable[PlaylistItem]:
+        return self.__items
+
+    @property
+    def content(self) -> str:
         return "#EXTM3U\n" + "\n".join(str(item) for item in self.items)
 
 
@@ -110,19 +138,28 @@ class Operations(FuseOperations):
         return self.root.find(path.lstrip(os.sep)).read()
 
 
-def mount(root, mountpoint, **kwargs):
-    kwargs.setdefault('nothreads', True)
-    kwargs.setdefault('allow_other', True)
-
+def mount(root: Directory, mountpoint: str, **kwargs):
     FUSE(Operations(root), mountpoint, **kwargs)
 
 
-def parse_options(options_s):
-    options_d = {}
-    for option_s in options_s.split(','):
-        option_l = option_s.split('=')
-        if len(option_l) == 2:
-            options_d[option_l[0]] = option_l[1]
-        else:
-            options_d[option_l[0]] = True
-    return options_d
+def argument_parser() -> ArgumentParser:
+    parser = ArgumentParser()
+    parser.add_argument('-i', '--interactive', help='Start in interactive mode', action='store_true')
+    parser.add_argument('-o', '--options', help='Mount options', default='')
+    return parser
+
+
+def parse_options(arguments) -> dict:
+    parsed = {}
+    for option in arguments.options.split(','):
+        try:
+            (name, value) = option.split('=')
+        except ValueError:
+            (name, value) = option, True
+        parsed[name] = value
+
+    parsed.setdefault('fsname', 'sitefs')
+    parsed.setdefault('foreground', arguments.interactive)
+    parsed.setdefault('nothreads', True)
+    parsed.setdefault('allow_other', True)
+    return parsed
