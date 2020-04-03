@@ -10,7 +10,7 @@ try:
     from fusepy import Operations as FuseOperations, FuseOSError, FUSE
 except ImportError:
     from fuse import Operations as FuseOperations, FuseOSError, FUSE
-from typing import Iterable, List
+from typing import Iterable, List, TypeVar
 from argparse import ArgumentParser
 import time, os, stat, errno
 
@@ -115,6 +115,9 @@ class Operations(FuseOperations):
 
     def read(self, path: str, size, offset, fh):
         return self.root.find(path.lstrip(os.sep)).read()
+
+
+FileOrDirectory = TypeVar('FileOrDirectory', File, Directory)
 
 
 def mount(root: Directory, mountpoint: str, **kwargs):
