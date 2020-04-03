@@ -101,7 +101,7 @@ class Playlist(File):
         return ("#EXTM3U\n" + "\n".join(str(item) for item in self.__items)).encode()
 
 
-class Operations(FuseOperations):
+class SiteFS(FuseOperations):
 
     def __init__(self, root: Directory):
         FuseOperations.__init__(self)
@@ -121,7 +121,7 @@ FileOrDirectory = TypeVar('FileOrDirectory', File, Directory)
 
 
 def mount(root: Directory, mountpoint: str, **kwargs):
-    FUSE(Operations(root), mountpoint, **kwargs)
+    FUSE(SiteFS(root), mountpoint, **kwargs)
 
 
 def argument_parser() -> ArgumentParser:
@@ -140,7 +140,6 @@ def parse_options(arguments) -> dict:
             (name, value) = option, True
         parsed[name] = value
 
-    parsed.setdefault('fsname', 'sitefs')
     parsed.setdefault('foreground', arguments.interactive)
     parsed.setdefault('nothreads', True)
     parsed.setdefault('allow_other', True)
