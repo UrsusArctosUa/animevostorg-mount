@@ -155,8 +155,8 @@ class AllPages:
         series = json.loads(page.text)
         if len(series['data']) < self.__limit:
             self.__limit = len(series['data'])
-        max_page = series['state']['count'] // self.__limit + 1
-        pages = [Directory("%03d" % page, Page(page, self.__quality, self.__limit)) for page in range(1, max_page)]
+        last_page = series['state']['count'] // self.__limit + 1
+        pages = [Directory("%03d" % page, Page(page, self.__quality, self.__limit)) for page in range(1, last_page + 1)]
         return pages
 
 
