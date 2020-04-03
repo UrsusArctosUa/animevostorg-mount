@@ -31,7 +31,7 @@ class File:
                     st_uid=os.getuid(), st_mode=stat.S_IFREG | 0o444, st_nlink=1, st_size=len(self.read()))
         return attr
 
-    def find(self, path: str):
+    def find(self, path: str) -> 'File':
         if path == '':
             return self
         else:
@@ -57,7 +57,7 @@ class Directory:
                     st_uid=os.getuid(), st_mode=stat.S_IFDIR | 0o555, st_nlink=1, st_size=4096)
         return attr
 
-    def find(self, path: str):
+    def find(self, path: str) -> 'FileOrDirectory':
         if path == '':
             return self
 
@@ -101,7 +101,7 @@ class Playlist(File):
         return ("#EXTM3U\n" + "\n".join(str(item) for item in self.__items)).encode()
 
 
-class SiteFS(FuseOperations):
+class WebFS(FuseOperations):
 
     def __init__(self, root: Directory):
         FuseOperations.__init__(self)
@@ -121,7 +121,10 @@ FileOrDirectory = TypeVar('FileOrDirectory', File, Directory)
 
 
 def mount(root: Directory, mountpoint: str, **kwargs):
-    FUSE(SiteFS(root), mountpoint, **kwargs)
+    kwargs.setdefault('fsname', 'www-fuse')
+    kwargs.setdefault('nothreads', True)
+    kwargs.setdefault('allow_other', True)
+    FUSE(WebFS(root), mountpoint, **kwargs)
 
 
 def argument_parser() -> ArgumentParser:
@@ -141,6 +144,4 @@ def parse_options(arguments) -> dict:
         parsed[name] = value
 
     parsed.setdefault('foreground', arguments.interactive)
-    parsed.setdefault('nothreads', True)
-    parsed.setdefault('allow_other', True)
     return parsed

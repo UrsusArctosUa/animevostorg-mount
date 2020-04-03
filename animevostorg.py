@@ -6,7 +6,7 @@ Created on Oct 30, 2018
 @author: Dmytro Dubrovny <dubrovnyd@gmail.com>
 '''
 
-from sitefs import File, Directory, Playlist, PlaylistItem, FileOrDirectory
+from webfs import File, Directory, Playlist, PlaylistItem, FileOrDirectory
 from typing import List, Iterator
 from cachetools import cached, TTLCache
 import requests, json, os, toml
@@ -172,7 +172,7 @@ class Root(Directory):
 
 
 if __name__ == '__main__':
-    from sitefs import mount, parse_options, argument_parser
+    from webfs import mount, parse_options, argument_parser
 
     parser = argument_parser()
     parser.add_argument('quality', type=str, help='Video quality', choices=Episode.qualities())
@@ -181,7 +181,7 @@ if __name__ == '__main__':
 
     arguments = parser.parse_args()
     options = parse_options(arguments)
-    options.setdefault('fsname', "animevostorg_%s" % arguments.quality)
+    options.setdefault('fsname', "animevost.org-%s-fuse" % arguments.quality)
     options.setdefault('conf', arguments.configuration)
     configuration = options['conf']
     del options['conf']
