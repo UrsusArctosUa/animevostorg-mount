@@ -51,9 +51,10 @@ class Episode(PlaylistItem):
         return ['std', 'hd']
 
 
-class Title:
+class TitleDirectory(Directory):
 
-    def __init__(self, title_id: int, quality: str):
+    def __init__(self, name: str, title_id: int, quality: str):
+        Directory.__init__(self, name)
         self.__title_id = title_id
         self.__quality = quality
 
@@ -83,9 +84,10 @@ class Title:
         return playlist
 
 
-class Page:
+class Page(Directory):
 
-    def __init__(self, number: int, quality: str, limit: int = 99):
+    def __init__(self, name: str, number: int, quality: str, limit: int = 99):
+        Directory.__init__(self, name)
         self.__number = number
         self.__quality = quality
         self.__limit = limit
@@ -101,13 +103,14 @@ class Page:
         titles = []
         for s in series['data']:
             index += 1
-            titles.append(Directory("%02d %s" % (index, s['title']), Title(s['id'], self.__quality)))
+            titles.append(TitleDirectory("%02d %s" % (index, s['title']), s['id'], self.__quality))
         return titles
 
 
-class Favorites:
+class Favorites(Directory):
 
-    def __init__(self, quality: str, username: str, password: str):
+    def __init__(self, name: str, quality: str, username: str, password: str):
+        Directory.__init__(self, name)
         self.__quality = quality
         self.__username = username
         self.__password = password
@@ -128,7 +131,7 @@ class Favorites:
             titles = []
             for s in series['data']:
                 index += 1
-                titles.append(Directory("%02d %s" % (index, s['title']), Title(s['id'], self.__quality)))
+                titles.append(TitleDirectory("%02d %s" % (index, s['title']), s['id'], self.__quality))
             return titles
 
     @cached(cache=TTLCache(maxsize=1024, ttl=30000))
@@ -140,9 +143,10 @@ class Favorites:
         raise GetTokenError(data['error'])
 
 
-class AllPages:
+class AllPages(Directory):
 
-    def __init__(self, quality: str):
+    def __init__(self, name: str, quality: str):
+        Directory.__init__(self, name)
         self.__limit = 99
         self.__quality = quality
 
@@ -156,18 +160,18 @@ class AllPages:
         if len(series['data']) < self.__limit:
             self.__limit = len(series['data'])
         last_page = series['state']['count'] // self.__limit + 1
-        pages = [Directory("%03d" % page, Page(page, self.__quality, self.__limit)) for page in range(1, last_page + 1)]
+        pages = [Page("%03d" % page, page, self.__quality, self.__limit) for page in range(1, last_page + 1)]
         return pages
 
 
 class Root(Directory):
 
     def __init__(self, quality: str, conf: str):
-        directories = [Directory('latest', Page(1, quality)), Directory('all', AllPages(quality))]
+        directories = [Page('latest', 1, quality), AllPages('all', quality)]
         if os.path.isfile(conf):
             config = toml.load(conf)
             if all(k in config for k in ('username', 'password')):
-                directories.append(Directory('favorites', Favorites(quality, config['username'], config['password'])))
+                directories.append(Favorites('favorites', quality, config['username'], config['password']))
         Directory.__init__(self, '', directories)
 
 

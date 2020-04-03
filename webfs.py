@@ -46,10 +46,13 @@ class File:
 
 class Directory:
 
-    def __init__(self, name: str, items: Iterable):
+    def __init__(self, name: str, items: Iterable['FileOrDirectory'] = ()):
         self.__name = name
         self.__items = items
         self.__defaults = ['.', '..']
+
+    def __iter__(self):
+        return iter(self.__items)
 
     @property
     def attr(self) -> dict:
@@ -63,7 +66,7 @@ class Directory:
 
         split = path.split(os.sep)
         name = split.pop(0)
-        for item in self.__items:
+        for item in self:
             if str(item) == name:
                 item = item.find(os.sep.join(split))
                 return item
@@ -71,7 +74,7 @@ class Directory:
         raise FuseOSError(errno.ENOENT)
 
     def list(self) -> List[str]:
-        return self.__defaults + [str(item) for item in self.__items]
+        return self.__defaults + [str(item) for item in self]
 
     def __str__(self) -> str:
         return sanitize_filename(self.__name)
@@ -97,8 +100,11 @@ class Playlist(File):
         File.__init__(self, "%s.m3u8" % name)
         self.__items = items
 
+    def __iter__(self):
+        return iter(self.__items)
+
     def read(self) -> bytes:
-        return ("#EXTM3U\n" + "\n".join(str(item) for item in self.__items)).encode()
+        return ("#EXTM3U\n" + "\n".join(str(item) for item in self)).encode()
 
 
 class WebFS(FuseOperations):
