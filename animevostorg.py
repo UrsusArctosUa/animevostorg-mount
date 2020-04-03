@@ -29,7 +29,7 @@ class Episode(PlaylistItem):
     def __init__(self, title, url):
         PlaylistItem.__init__(self, title, url)
 
-    def __lt__(self, other: 'Episode'):
+    def __lt__(self, other: 'Episode') -> bool:
         self_split = self.title.split(' ')[0]
         other_split = other.title.split(' ')[0]
         try:
@@ -76,8 +76,9 @@ class Title:
                 pass
         playlist = []
         num = 0
-        for episode in sorted(series):
-            playlist.append(Playlist(episode.title, series[num:]))
+        sorted_series = sorted(series)
+        for episode in sorted_series:
+            playlist.append(Playlist(episode.title, sorted_series[num:]))
             num += 1
         return playlist
 
