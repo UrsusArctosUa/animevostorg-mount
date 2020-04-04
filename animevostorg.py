@@ -6,10 +6,13 @@ Created on Oct 30, 2018
 @author: Dmytro Dubrovny <dubrovnyd@gmail.com>
 '''
 
-from webfs import File, Directory, Playlist, PlaylistItem, FileOrDirectory
 from typing import List, Iterator
 from cachetools import cached, TTLCache
-import requests, json, os, toml
+from webfs import File, Directory, Playlist, PlaylistItem, FileOrDirectory
+import json
+import os
+import requests
+import toml
 
 API_URL = 'https://api.animevost.org/v1'
 
@@ -22,6 +25,30 @@ class GetTokenError(Exception):
     @property
     def message(self) -> str:
         return self.__message
+
+
+class SearchTitle:
+    FIELD_GENRE = 'gen'
+    FIELD_NAME = 'name'
+    FIELD_CATEGORY = 'cat'
+    FIELD_YEAR = 'year'
+
+    def __init__(self, field: str, value: str, quality: str):
+        self.__field = field
+        self.__value = value
+        self.__quality = quality
+
+    def __iter__(self) -> Iterator[FileOrDirectory]:
+        return iter(self.__search())
+
+    @cached(cache=TTLCache(maxsize=1024, ttl=3000))
+    def __search(self) -> List[FileOrDirectory]:
+        page = requests.post("%s/search" % API_URL, {self.__field: self.__value})
+        series = json.loads(page.text)
+        series.setdefault('data', [])
+        titles = [TitleDirectory("%02d %s" % (i, s['title']), s['id'], self.__quality) for i, s in
+                  enumerate(series['data'], start=1)]
+        return titles
 
 
 class Episode(PlaylistItem):
@@ -75,13 +102,9 @@ class TitleDirectory(Directory):
                         series.append(Episode(episode_data['name'], episode_data[quality]))
                         break
                 pass
-        playlist = []
-        num = 0
         sorted_series = sorted(series)
-        for episode in sorted_series:
-            playlist.append(Playlist(episode.title, sorted_series[num:]))
-            num += 1
-        return playlist
+        playlists = [Playlist(episode.title, sorted_series[i:]) for i, episode in enumerate(sorted_series, start=1)]
+        return playlists
 
 
 class Page(Directory):
@@ -99,12 +122,48 @@ class Page(Directory):
     def __titles(self) -> List[FileOrDirectory]:
         page = requests.get("%s/last?page=%d&quantity=%d" % (API_URL, self.__number, self.__limit))
         series = json.loads(page.text)
-        index = 0
-        titles = []
-        for s in series['data']:
-            index += 1
-            titles.append(TitleDirectory("%02d %s" % (index, s['title']), s['id'], self.__quality))
+        titles = [TitleDirectory("%02d %s" % (i, s['title']), s['id'], self.__quality) for i, s in
+                  enumerate(series['data'], start=1)]
         return titles
+
+
+class LogSearchDirectory(Directory):
+
+    def __init__(self, name: str, field: str, quality: str):
+        Directory.__init__(self, name)
+        self.__field = field
+        self.__quality = quality
+        self.__history = dict()
+
+    def __iter__(self) -> Iterator[FileOrDirectory]:
+        return iter(self.__history.values())
+
+    def find(self, path: str) -> 'FileOrDirectory':
+        if path == '':
+            return self
+
+        path_listed = path.split(os.sep)
+        search_query = path_listed.pop(0)
+        if search_query not in self.__history:
+            self.__history[search_query] = Directory(search_query,
+                                                     SearchTitle(self.__field, search_query, self.__quality))
+        deeper_path = os.sep.join(path_listed)
+        return self.__history[search_query].find(deeper_path)
+
+
+class GenresSearchDirectory(LogSearchDirectory):
+
+    def __init__(self, name: str, quality: str):
+        LogSearchDirectory.__init__(self, name, SearchTitle.FIELD_GENRE, quality)
+
+    def __iter__(self) -> Iterator[FileOrDirectory]:
+        return iter(self.__genres())
+
+    @cached(cache=TTLCache(maxsize=1024, ttl=3000))
+    def __genres(self):
+        page = requests.get("%s/genres" % API_URL)
+        data = json.loads(page.text)
+        return [genre for genre in data.values()]
 
 
 class Favorites(Directory):
@@ -127,11 +186,8 @@ class Favorites(Directory):
         else:
             page = requests.post("%s/favorites" % API_URL, {'token': token})
             series = json.loads(page.text)
-            index = 0
-            titles = []
-            for s in series['data']:
-                index += 1
-                titles.append(TitleDirectory("%02d %s" % (index, s['title']), s['id'], self.__quality))
+            titles = [TitleDirectory("%02d %s" % (i, s['title']), s['id'], self.__quality) for i, s in
+                      enumerate(series['data'], start=1)]
             return titles
 
     @cached(cache=TTLCache(maxsize=1024, ttl=30000))
@@ -167,7 +223,15 @@ class AllPages(Directory):
 class Root(Directory):
 
     def __init__(self, quality: str, conf: str):
-        directories = [Page('latest', 1, quality), AllPages('all', quality)]
+        directories = [
+            Page('latest', 1, quality),
+            AllPages('all', quality),
+            Directory('search', [
+                LogSearchDirectory('by-name', SearchTitle.FIELD_NAME, quality),
+                GenresSearchDirectory('by-genre', quality),
+                LogSearchDirectory('by-year', SearchTitle.FIELD_YEAR, quality)
+            ])
+        ]
         if os.path.isfile(conf):
             config = toml.load(conf)
             if all(k in config for k in ('username', 'password')):

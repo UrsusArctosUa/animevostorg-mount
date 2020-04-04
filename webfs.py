@@ -10,9 +10,12 @@ try:
     from fusepy import Operations as FuseOperations, FuseOSError, FUSE
 except ImportError:
     from fuse import Operations as FuseOperations, FuseOSError, FUSE
-from typing import Iterable, List, TypeVar
 from argparse import ArgumentParser
-import time, os, stat, errno
+from typing import Iterable, List, TypeVar
+import errno
+import os
+import stat
+import time
 
 
 def sanitize_filename(filename):
@@ -129,7 +132,8 @@ FileOrDirectory = TypeVar('FileOrDirectory', File, Directory)
 def mount(root: Directory, mountpoint: str, **kwargs):
     kwargs.setdefault('fsname', 'www-fuse')
     kwargs.setdefault('nothreads', True)
-    kwargs.setdefault('allow_other', True)
+    if not os.geteuid():
+        kwargs.setdefault('allow_other', True)
     FUSE(WebFS(root), mountpoint, **kwargs)
 
 
