@@ -8,11 +8,12 @@ Created on Oct 30, 2018
 
 from typing import List, Iterator
 from cachetools import cached, TTLCache
-from webfs import File, Directory, Playlist, PlaylistItem, FileOrDirectory
+from webfs import File, Directory, Playlist, PlaylistItem, FileOrDirectory, FuseOSError
 import json
 import os
 import requests
 import toml
+import errno
 
 API_URL = 'https://api.animevost.org/v1'
 
@@ -127,7 +128,7 @@ class Page(Directory):
         return titles
 
 
-class LogSearchDirectory(Directory):
+class Search(Directory):
 
     def __init__(self, name: str, field: str, quality: str):
         Directory.__init__(self, name)
@@ -151,10 +152,12 @@ class LogSearchDirectory(Directory):
         return self.__history[search_query].find(deeper_path)
 
 
-class GenresSearchDirectory(LogSearchDirectory):
+class Genres(Directory):
 
     def __init__(self, name: str, quality: str):
-        LogSearchDirectory.__init__(self, name, SearchTitle.FIELD_GENRE, quality)
+        Directory.__init__(self, name)
+        self.__quality = quality
+        self.__items = dict()
 
     def __iter__(self) -> Iterator[FileOrDirectory]:
         return iter(self.__genres())
@@ -164,6 +167,20 @@ class GenresSearchDirectory(LogSearchDirectory):
         page = requests.get("%s/genres" % API_URL)
         data = json.loads(page.text)
         return [genre for genre in data.values()]
+
+    def find(self, path: str) -> 'FileOrDirectory':
+        if path == '':
+            return self
+
+        path_listed = path.split(os.sep)
+        genre = path_listed.pop(0)
+        if genre not in self.__genres():
+            raise FuseOSError(errno.ENOENT)
+
+        if genre not in self.__items:
+            self.__items[genre] = Directory(genre, SearchTitle(SearchTitle.FIELD_GENRE, genre, self.__quality))
+        deeper_path = os.sep.join(path_listed)
+        return self.__items[genre].find(deeper_path)
 
 
 class Favorites(Directory):
@@ -199,7 +216,7 @@ class Favorites(Directory):
         raise GetTokenError(data['error'])
 
 
-class AllPages(Directory):
+class All(Directory):
 
     def __init__(self, name: str, quality: str):
         Directory.__init__(self, name)
@@ -225,11 +242,12 @@ class Root(Directory):
     def __init__(self, quality: str, conf: str):
         directories = [
             Page('latest', 1, quality),
-            AllPages('all', quality),
+            All('all', quality),
+            Genres('genres', quality),
             Directory('search', [
-                LogSearchDirectory('by-name', SearchTitle.FIELD_NAME, quality),
-                GenresSearchDirectory('by-genre', quality),
-                LogSearchDirectory('by-year', SearchTitle.FIELD_YEAR, quality)
+                Search('by-name', SearchTitle.FIELD_NAME, quality),
+                Search('by-category', SearchTitle.FIELD_NAME, quality),
+                Search('by-year', SearchTitle.FIELD_YEAR, quality)
             ])
         ]
         if os.path.isfile(conf):
