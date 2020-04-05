@@ -104,7 +104,7 @@ class TitleDirectory(Directory):
                         break
                 pass
         sorted_series = sorted(series)
-        playlists = [Playlist(episode.title, sorted_series[i:]) for i, episode in enumerate(sorted_series, start=1)]
+        playlists = [Playlist(episode.title, sorted_series[i:]) for i, episode in enumerate(sorted_series)]
         return playlists
 
 
