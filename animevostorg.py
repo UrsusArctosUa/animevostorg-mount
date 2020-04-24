@@ -36,7 +36,7 @@ class Configuration:
             configuration.setdefault('password', None)
             self.__username = configuration['username']
             self.__password = configuration['password']
-        self.__limit = 99
+        self.__limit = 40
 
     @property
     def limit(self) -> int:
@@ -59,7 +59,7 @@ class Configuration:
     def token(self):
         if self.__username is None or self.__password is None:
             raise GetTokenError("Username or password is not configured")
-        page = requests.post("%s/gettoken" % self.api_url, {'user': self.__username, 'pass': self.__password})
+        page = requests.post('{:s}/gettoken'.format(self.api_url), {'user': self.__username, 'pass': self.__password})
         data = json.loads(page.text)
         if data['status'] == 'ok':
             return data['token']
@@ -85,18 +85,20 @@ class TitleFinder:
 
     @cached(cache=TTLCache(maxsize=1024, ttl=3000))
     def __search(self) -> List[FSItem]:
-        page = requests.post("%s/search" % self.__config.api_url, self.__params)
+        page = requests.post('{:s}/search'.format(self.__config.api_url), self.__params)
         series = json.loads(page.text)
         series.setdefault('data', [])
-        titles = [Title("%02d %s" % (i, s['title']), s['id'], self.__config) for i, s in
+        titles = [Title('{:02d} {:s}'.format(i, s['title']), s['id'], self.__config) for i, s in
                   enumerate(series['data'], start=1)]
         return titles
 
 
 class Episode(PlaylistItem):
 
-    def __init__(self, title, url):
-        PlaylistItem.__init__(self, title, url)
+    def __init__(self, title: str, urls: dict, config: Configuration):
+        PlaylistItem.__init__(self, title, '')
+        self.__urls = urls
+        self.__config = config
 
     def __lt__(self, other: 'Episode') -> bool:
         self_split = self.title.split(' ')[0]
@@ -115,6 +117,17 @@ class Episode(PlaylistItem):
             return True
         return int(self_num) < int(other_num)
 
+    @property
+    @cached(cache=TTLCache(maxsize=1024, ttl=3000))
+    def path(self) -> str:
+        if self.__config.quality in self.__urls and requests.head(self.__urls[self.__config.quality]).ok:
+            return self.__urls[self.__config.quality]
+        else:
+            for quality in Configuration.qualities():
+                if quality in self.__urls and requests.head(self.__urls[quality]).ok:
+                    return self.__urls[quality]
+        return ''
+
 
 class Title(Directory):
 
@@ -124,25 +137,31 @@ class Title(Directory):
         self.__config = config
 
     def __iter__(self):
-        return iter(self.__playlist())
+        return iter(self.__items())
 
     @cached(cache=TTLCache(maxsize=1024, ttl=3000))
-    def __playlist(self) -> List[Playlist]:
-        page = requests.post("%s/playlist" % self.__config.api_url, {'id': self.__title_id}, None)
+    def __items(self) -> List[FSItem]:
+        page = requests.post('{:s}/playlist'.format(self.__config.api_url), {'id': self.__title_id}, None)
         series_data = json.loads(page.text)
         series = []
         for episode_data in series_data:
-            if self.__config.quality in episode_data and requests.head(episode_data[self.__config.quality]).ok:
-                series.append(Episode(episode_data['name'], episode_data[self.__config.quality]))
-            else:
-                for quality in Configuration.qualities():
-                    if quality in episode_data and requests.head(episode_data[quality]).ok:
-                        series.append(Episode(episode_data['name'], episode_data[quality]))
-                        break
-                pass
+            series.append(Episode(episode_data['name'], episode_data, self.__config))
         sorted_series = sorted(series)
-        playlists = [Playlist(episode.title, sorted_series[i:]) for i, episode in enumerate(sorted_series)]
-        return playlists
+        total = len(sorted_series)
+        if total < self.__config.limit * 1.2:
+            items = self.__create_playlists(sorted_series)
+        else:
+            items = []
+            for i in range(0, total, self.__config.limit):
+                chunk = sorted_series[i:i + self.__config.limit]
+                items.append(
+                    Directory('{:03d}-{:03d}'.format(i + 1, min(i + self.__config.limit, total)),
+                              self.__create_playlists(chunk)))
+        return items
+
+    @staticmethod
+    def __create_playlists(items: Iterator[PlaylistItem]) -> Iterator[Playlist]:
+        return [Playlist(item.title, items[n:]) for n, item in enumerate(items)]
 
 
 class Page(Directory):
@@ -159,9 +178,9 @@ class Page(Directory):
     @cached(cache=TTLCache(maxsize=1024, ttl=3000))
     def __titles(self) -> List[FSItem]:
         page = requests.get(
-            "%s/last?page=%d&quantity=%d" % (self.__config.api_url, self.__number, self.__limit))
+            '{:s}/last?page={:d}&quantity={:d}'.format(self.__config.api_url, self.__number, self.__limit))
         series = json.loads(page.text)
-        titles = [Title("%02d %s" % (i, s['title']), s['id'], self.__config) for i, s in
+        titles = [Title('{:02d} {:s}'.format(i, s['title']), s['id'], self.__config) for i, s in
                   enumerate(series['data'], start=1)]
         return titles
 
@@ -202,7 +221,7 @@ class Genres(Directory):
 
     @cached(cache=TTLCache(maxsize=1024, ttl=3000))
     def __genres(self):
-        page = requests.get("%s/genres" % self.__config.api_url)
+        page = requests.get('{:s}/genres'.format(self.__config.api_url))
         data = json.loads(page.text)
         return [genre for genre in data.values()]
 
@@ -237,9 +256,9 @@ class Favorites(Directory):
         except GetTokenError as err:
             return [File('error.txt', str(err))]
         else:
-            page = requests.post("%s/favorites" % self.__config.api_url, {'token': token})
+            page = requests.post('{:s}/favorites'.format(self.__config.api_url), {'token': token})
             series = json.loads(page.text)
-            titles = [Title("%02d %s" % (i, s['title']), s['id'], self.__config) for i, s in
+            titles = [Title('{:02d} {:s}'.format(i, s['title']), s['id'], self.__config) for i, s in
                       enumerate(series['data'], start=1)]
             return titles
 
@@ -256,12 +275,12 @@ class All(Directory):
 
     @cached(cache=TTLCache(maxsize=1024, ttl=3000))
     def __pages(self) -> List[FSItem]:
-        page = requests.get("%s/last?page=1&quantity=%d" % (self.__config.api_url, self.__limit))
+        page = requests.get('{:s}/last?page=1&quantity={:d}'.format(self.__config.api_url, self.__limit))
         series = json.loads(page.text)
         if len(series['data']) < self.__limit:
             self.__limit = len(series['data'])
         last_page = series['state']['count'] // self.__limit + 1
-        pages = [Page("%03d" % page, page, self.__config, self.__limit) for page in range(1, last_page + 1)]
+        pages = [Page('{:03d}'.format(page), page, self.__config, self.__limit) for page in range(1, last_page + 1)]
         return pages
 
 
@@ -292,7 +311,7 @@ if __name__ == '__main__':
 
     arguments = parser.parse_args()
     options = parse_options(arguments)
-    options.setdefault('fsname', "doc.org-%s-fuse" % arguments.quality)
+    options.setdefault('fsname', 'doc.org-{:s}-fuse'.format(arguments.quality))
     options.setdefault('conf', arguments.configuration)
     conf = Configuration(options['conf'], arguments.quality)
     del options['conf']

@@ -85,29 +85,41 @@ class Directory:
 
 class PlaylistItem:
 
-    def __init__(self, title: str, url: str):
+    def __init__(self, title: str, path: str, duration: int = -1):
         self.__title = title
-        self.__url = url
+        self.__path = path
+        self.__duration = duration
 
-    def __str__(self):
-        return "#EXTINF:-1, %(title)s\n%(url)s\n" % {'url': self.__url, 'title': self.__title}
+    def __str__(self) -> str:
+        if len(self.path):
+            return '#EXTINF:{:d}, {:s}\n{:s}\n'.format(self.duration, self.title, self.path)
+        else:
+            return '\n'
 
     @property
     def title(self) -> str:
         return self.__title
 
+    @property
+    def path(self) -> str:
+        return self.__path
+
+    @property
+    def duration(self) -> int:
+        return self.__duration
+
 
 class Playlist(File):
 
     def __init__(self, name: str, items: Iterable[PlaylistItem]):
-        File.__init__(self, "%s.m3u8" % name)
+        File.__init__(self, '{:s}.m3u8'.format(name))
         self.__items = items
 
     def __iter__(self):
         return iter(self.__items)
 
     def read(self) -> bytes:
-        return ("#EXTM3U\n" + "\n".join(str(item) for item in self)).encode()
+        return ('#EXTM3U\n' + '\n'.join(str(item) for item in self)).encode()
 
 
 class WebFS(FuseOperations):
