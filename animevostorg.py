@@ -8,7 +8,7 @@ Created on Oct 30, 2018
 
 from typing import List, Iterator
 from cachetools import cached, TTLCache
-from webfs import File, Directory, Playlist, PlaylistItem, FileOrDirectory, FuseOSError
+from webfs import File, Directory, Playlist, PlaylistItem, FSItem, FuseOSError
 import json
 import os
 import requests
@@ -70,26 +70,25 @@ class Configuration:
         return ['std', 'hd']
 
 
-class SearchTitle:
+class TitleFinder:
     FIELD_GENRE = 'gen'
     FIELD_NAME = 'name'
     FIELD_CATEGORY = 'cat'
     FIELD_YEAR = 'year'
 
-    def __init__(self, field: str, value: str, config: Configuration):
-        self.__field = field
-        self.__value = value
+    def __init__(self, config: Configuration, **params):
         self.__config = config
+        self.__params = params
 
-    def __iter__(self) -> Iterator[FileOrDirectory]:
+    def __iter__(self) -> Iterator[FSItem]:
         return iter(self.__search())
 
     @cached(cache=TTLCache(maxsize=1024, ttl=3000))
-    def __search(self) -> List[FileOrDirectory]:
-        page = requests.post("%s/search" % self.__config.api_url, {self.__field: self.__value})
+    def __search(self) -> List[FSItem]:
+        page = requests.post("%s/search" % self.__config.api_url, self.__params)
         series = json.loads(page.text)
         series.setdefault('data', [])
-        titles = [TitleDirectory("%02d %s" % (i, s['title']), s['id'], self.__config) for i, s in
+        titles = [Title("%02d %s" % (i, s['title']), s['id'], self.__config) for i, s in
                   enumerate(series['data'], start=1)]
         return titles
 
@@ -117,7 +116,7 @@ class Episode(PlaylistItem):
         return int(self_num) < int(other_num)
 
 
-class TitleDirectory(Directory):
+class Title(Directory):
 
     def __init__(self, name: str, title_id: int, config: Configuration):
         Directory.__init__(self, name)
@@ -148,21 +147,21 @@ class TitleDirectory(Directory):
 
 class Page(Directory):
 
-    def __init__(self, name: str, number: int, config: Configuration, limit: int=99):
+    def __init__(self, name: str, number: int, config: Configuration, limit: int = 99):
         Directory.__init__(self, name)
         self.__number = number
         self.__config = config
         self.__limit = limit
 
-    def __iter__(self) -> Iterator[FileOrDirectory]:
+    def __iter__(self) -> Iterator[FSItem]:
         return iter(self.__titles())
 
     @cached(cache=TTLCache(maxsize=1024, ttl=3000))
-    def __titles(self) -> List[FileOrDirectory]:
+    def __titles(self) -> List[FSItem]:
         page = requests.get(
             "%s/last?page=%d&quantity=%d" % (self.__config.api_url, self.__number, self.__limit))
         series = json.loads(page.text)
-        titles = [TitleDirectory("%02d %s" % (i, s['title']), s['id'], self.__config) for i, s in
+        titles = [Title("%02d %s" % (i, s['title']), s['id'], self.__config) for i, s in
                   enumerate(series['data'], start=1)]
         return titles
 
@@ -175,17 +174,17 @@ class Search(Directory):
         self.__field = field
         self.__config = config
 
-    def __iter__(self) -> Iterator[FileOrDirectory]:
+    def __iter__(self) -> Iterator[FSItem]:
         return iter(self.__history.values())
 
-    def find(self, path: str) -> 'FileOrDirectory':
+    def find(self, path: str) -> 'FSItem':
         if path == '':
             return self
 
         path_listed = path.split(os.sep)
         search_query = path_listed.pop(0)
         if search_query not in self.__history:
-            search_title = SearchTitle(self.__field, search_query, self.__config)
+            search_title = TitleFinder(self.__config, **{self.__field: search_query})
             self.__history[search_query] = Directory(search_query, search_title)
         deeper_path = os.sep.join(path_listed)
         return self.__history[search_query].find(deeper_path)
@@ -198,7 +197,7 @@ class Genres(Directory):
         self.__items = dict()
         self.__config = config
 
-    def __iter__(self) -> Iterator[FileOrDirectory]:
+    def __iter__(self) -> Iterator[FSItem]:
         return iter(self.__genres())
 
     @cached(cache=TTLCache(maxsize=1024, ttl=3000))
@@ -207,7 +206,7 @@ class Genres(Directory):
         data = json.loads(page.text)
         return [genre for genre in data.values()]
 
-    def find(self, path: str) -> 'FileOrDirectory':
+    def find(self, path: str) -> 'FSItem':
         if path == '':
             return self
 
@@ -217,7 +216,7 @@ class Genres(Directory):
             raise FuseOSError(errno.ENOENT)
 
         if genre not in self.__items:
-            self.__items[genre] = Directory(genre, SearchTitle(SearchTitle.FIELD_GENRE, genre, self.__config))
+            self.__items[genre] = Directory(genre, TitleFinder(self.__config, **{TitleFinder.FIELD_GENRE: genre}))
         deeper_path = os.sep.join(path_listed)
         return self.__items[genre].find(deeper_path)
 
@@ -228,11 +227,11 @@ class Favorites(Directory):
         Directory.__init__(self, name)
         self.__config = config
 
-    def __iter__(self) -> Iterator[FileOrDirectory]:
+    def __iter__(self) -> Iterator[FSItem]:
         return iter(self.__titles())
 
     @cached(cache=TTLCache(maxsize=1024, ttl=3000))
-    def __titles(self) -> List[FileOrDirectory]:
+    def __titles(self) -> List[FSItem]:
         try:
             token = self.__config.token
         except GetTokenError as err:
@@ -240,29 +239,29 @@ class Favorites(Directory):
         else:
             page = requests.post("%s/favorites" % self.__config.api_url, {'token': token})
             series = json.loads(page.text)
-            titles = [TitleDirectory("%02d %s" % (i, s['title']), s['id'], self.__config) for i, s in
+            titles = [Title("%02d %s" % (i, s['title']), s['id'], self.__config) for i, s in
                       enumerate(series['data'], start=1)]
             return titles
 
 
 class All(Directory):
 
-    def __init__(self, name: str, config: Configuration):
+    def __init__(self, name: str, config: Configuration, limit: int = 99):
         Directory.__init__(self, name)
         self.__config = config
-        self.__limit = config.limit
+        self.__limit = limit
 
-    def __iter__(self) -> Iterator[FileOrDirectory]:
+    def __iter__(self) -> Iterator[FSItem]:
         return iter(self.__pages())
 
     @cached(cache=TTLCache(maxsize=1024, ttl=3000))
-    def __pages(self) -> List[FileOrDirectory]:
+    def __pages(self) -> List[FSItem]:
         page = requests.get("%s/last?page=1&quantity=%d" % (self.__config.api_url, self.__limit))
         series = json.loads(page.text)
         if len(series['data']) < self.__limit:
             self.__limit = len(series['data'])
         last_page = series['state']['count'] // self.__limit + 1
-        pages = [Page("%03d" % page, page, self.__config) for page in range(1, last_page + 1)]
+        pages = [Page("%03d" % page, page, self.__config, self.__limit) for page in range(1, last_page + 1)]
         return pages
 
 
@@ -274,9 +273,9 @@ class Root(Directory):
             All('all', config),
             Genres('genres', config),
             Directory('search', [
-                Search('by-name', SearchTitle.FIELD_NAME, config),
-                Search('by-category', SearchTitle.FIELD_NAME, config),
-                Search('by-year', SearchTitle.FIELD_YEAR, config)
+                Search('by-name', TitleFinder.FIELD_NAME, config),
+                Search('by-category', TitleFinder.FIELD_CATEGORY, config),
+                Search('by-year', TitleFinder.FIELD_YEAR, config)
             ]),
             Favorites('favorites', config)
         ]

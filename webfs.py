@@ -49,7 +49,7 @@ class File:
 
 class Directory:
 
-    def __init__(self, name: str, items: Iterable['FileOrDirectory'] = ()):
+    def __init__(self, name: str, items: Iterable['FSItem'] = ()):
         self.__name = name
         self.__items = items
         self.__defaults = ['.', '..']
@@ -63,7 +63,7 @@ class Directory:
                     st_uid=os.getuid(), st_mode=stat.S_IFDIR | 0o555, st_nlink=1, st_size=4096)
         return attr
 
-    def find(self, path: str) -> 'FileOrDirectory':
+    def find(self, path: str) -> 'FSItem':
         if path == '':
             return self
 
@@ -126,7 +126,7 @@ class WebFS(FuseOperations):
         return self.root.find(path.lstrip(os.sep)).read()
 
 
-FileOrDirectory = TypeVar('FileOrDirectory', File, Directory)
+FSItem = TypeVar('FSItem', File, Directory)
 
 
 def mount(root: Directory, mountpoint: str, **kwargs):
