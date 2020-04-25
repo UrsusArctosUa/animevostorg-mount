@@ -1,0 +1,494 @@
+openapi: 3.0.1
+info:
+  title: Animevost.ORG API
+  description: 'This is a simple API docuemntation, reverce-engeneared from Android client'
+  license:
+    name: GNU-LGPL-3.0
+    url: 'https://www.gnu.org/licenses/lgpl-3.0.en.html'
+  version: 1.0.0
+externalDocs:
+  description: Find out more about Swagger
+  url: 'http://swagger.io'
+servers:
+  - url: 'https://api.animetop.info/v1'
+  - url: 'https://api.animevost.org/v1'
+tags:
+  - name: user
+    description: Authorization and profile
+  - name: titles
+  - name: favorites
+paths:
+  /gettoken:
+    post:
+      tags:
+        - user
+      summary: Auth token
+      requestBody:
+        description: Username and password to login
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              required:
+                - user
+                - pass
+              type: object
+              properties:
+                user:
+                  type: string
+                pass:
+                  type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  token:
+                    type: string
+                example:
+                  status: ok
+                  token: cab563f6eac254b895ac01fg2356a7c9
+  /userinfo:
+    post:
+      tags:
+        - user
+      summary: Profile info
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              required:
+                - token
+              type: object
+              properties:
+                token:
+                  type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserInfo'
+  /rasp:
+    get:
+      tags:
+        - titles
+      summary: Schedule
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Schedule'
+  /last:
+    get:
+      tags:
+        - titles
+      summary: Latest titles
+      parameters:
+        - name: page
+          in: query
+          description: 'Pagination, page number'
+          required: true
+          style: form
+          schema:
+            type: number
+            minimum: 1
+        - name: quantity
+          in: query
+          description: 'Titles per page'
+          required: true
+          style: form
+          schema:
+            type: number
+            minimum: 2
+            maximum: 40
+        - name: filter
+          in: query
+          description: unknown
+          required: false
+          style: form
+          schema:
+            type: string
+        - name: token
+          in: query
+          description: Auth token
+          required: false
+          style: form
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  state:
+                    $ref: '#/components/schemas/State'
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Title'
+  /info:
+    post:
+      tags:
+        - titles
+      summary: Title info
+      requestBody:
+        description: Title id
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              required:
+                - id
+              type: object
+              properties:
+                id:
+                  type: number
+                  example: 2425
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  state:
+                    $ref: '#/components/schemas/State'
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Title'
+  /playlist:
+    post:
+      tags:
+        - titles
+      summary: Title episodes
+      requestBody:
+        description: Title id
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              required:
+                - id
+              type: object
+              properties:
+                id:
+                  type: number
+                  example: 2425
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PlaylistItem'
+  /genres:
+    get:
+      tags:
+        - titles
+      summary: Genres list
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                example:
+                  '2': Боевые искусства
+                  '3': Жанр
+                  '4': Война
+                  '5': Драма
+                  '27': Этти
+                  '29': Мистика
+                  '30': Тип
+                  '31': ТВ
+                  '32': ТВ-спэшл
+                  '33': OVA
+                  '34': ONA
+                  '35': Полнометражный фильм
+                  '36': Короткометражный фильм
+                  '37': Год
+                  '38': '2013'
+                  '59': Русские субтитры
+                  '60': '1994'
+                  '61': Онгоинги
+                  '62': '1993'
+                  '63': '1992'
+                  '67': '1991'
+                  '68': Анонсы
+                  '69': '2016'
+                  '77': '2020'
+  /search:
+    post:
+      tags:
+        - titles
+      summary: Filtered titles list
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                gen:
+                  type: string
+                cat:
+                  type: string
+                name:
+                  type: string
+                year:
+                  type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  state:
+                    $ref: '#/components/schemas/State'
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Title'
+  /favorites:
+    post:
+      tags:
+        - favorites
+      summary: List of favorite titles
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              required:
+                - token
+              type: object
+              properties:
+                token:
+                  type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  state:
+                    $ref: '#/components/schemas/State'
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Title'
+  /addfavorites:
+    post:
+      tags:
+        - favorites
+      summary: Add title to favorites
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              required:
+                - token
+                - id
+              type: object
+              properties:
+                token:
+                  type: string
+                id:
+                  type: number
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  state:
+                    type: string
+                    example: ok
+                  error:
+                    type: string
+                    example: null
+  /delfavorites:
+    post:
+      tags:
+        - favorites
+      summary: Remove title from favorites
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              required:
+                - token
+                - id
+              type: object
+              properties:
+                token:
+                  type: string
+                id:
+                  type: number
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  state:
+                    type: string
+                    example: ok
+                  error:
+                    type: string
+                    example: null
+components:
+  schemas:
+    Schedule:
+      type: array
+      items:
+        type: object
+        properties:
+          id:
+            type: number
+          time:
+            type: string
+          name:
+            type: string
+          day:
+            type: number
+        example:
+          id: 2428
+          time: '19:30'
+          name: 'Проект «Белая Кошка»: Нулевая Хроника'
+          day: 0
+    UserInfo:
+      type: array
+      items:
+        type: object
+        properties:
+          info:
+            type: string
+          land:
+            type: string
+          photo:
+            type: string
+          favorites:
+            type: string
+          fullname:
+            type: string
+          email:
+            type: string
+      example:
+        info: ''
+        land: London
+        photo: foto_71274.jpg
+        favorites: '1261,2179,1998,1606,2180,456,466,1964,924,84'
+        fullname: John Smith
+        email: john_smith@example.com
+    State:
+      type: object
+      properties:
+        status:
+          type: string
+          example: ok
+        rek:
+          type: number
+          example: 1
+        page:
+          type: number
+        count:
+          type: number
+    Title:
+      type: object
+      properties:
+        screenImage:
+          type: array
+          items:
+            type: string
+          example:
+            - /uploads/posts/2020-04/1586012952_2.jpg
+            - /uploads/posts/2020-04/1586012880_3.jpg
+            - /uploads/posts/2020-04/1586012946_4.jpg
+        rating:
+          type: number
+          example: 2023
+        description:
+          type: string
+          example: "После истощения мировых энергетических ресурсов, было основано 12 мегаполисов нового типа, в которых существует своя система, оценивающая поступки каждого человека. Совершать злодеяния плохо, совершать слишком много злодеяний еще хуже, ведь у всего есть свои рамки дозволенного. Ученик средней школы Вуминлу из-за того, что он слишком много врал, был определен системой в ранг плохишей. Система отправила на его охоту Наказание Кармы – страшное чудовище, питающееся злодеями. Однако помимо этого, к Вуминлу был приставлен контролер Льенэн, который должен защищать его от чудовища и пытаться перевоспитать его, пока его поведение еще можно исправить.<br />\r\n<br />\r\nВуминлу упрям и не хочет ничего менять, ведь его устраивает его положение и он слишком сильно любит деньги, чтобы отказываться от привычного образа жизни и от обмана, к которому он часто прибегает. Он пытается отделаться от Льенэна и под предлогом ловушки для Наказания Кармы, подставляет своего контролера и на того обрушивается целое здание. Однако от Льенэна ему так легко не отделаться, к тому же тот должен постоянно находится в радиусе 100 метров от него.."
+        series:
+          type: string
+          example: >-
+            {'1 серия':'2147415148','2 серия':'2147415149','3
+            серия':'2147415150','4 серия':'2147415204','5 серия':'2147415259','6
+            серия':'2147415305'}
+        director:
+          type: string
+        urlImagePreview:
+          type: string
+          example: 'https://static.openni.ru/uploads/posts/2020-04/1586012891_1.jpeg'
+        year:
+          type: string
+          example: '2020'
+        genre:
+          type: string
+          example: 'комедия, фэнтези, боевые искусства, приключения'
+        id:
+          type: number
+          example: 2449
+        votes:
+          type: number
+          example: 586
+        isFavorite:
+          type: number
+          example: 0
+        title:
+          type: string
+          example: 'Бог обмана / Shi Huang Zhi Shen [1-6 из 12+]'
+        timer:
+          type: number
+          example: 0
+        type:
+          type: string
+          example: ТВ
+        isLikes:
+          type: number
+          example: 0
+    PlaylistItem:
+      type: object
+      properties:
+        std:
+          type: string
+          example: 'http://video.animetop.info/2147415290.mp4'
+        preview:
+          type: string
+          example: 'http://media.aniland.org/img/2147415290.jpg'
+        name:
+          type: string
+          example: 3 серия
+        hd:
+          type: string
+          example: 'http://video.animetop.info/720/2147415290.mp4'

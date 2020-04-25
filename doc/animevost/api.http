@@ -14,7 +14,6 @@ token={{token}}
 ###
 GET {{url}}/rasp
 ###
-# available parameters page, quantity, filter (?), token
 GET {{url}}/last?page=1&quantity=50
 ###
 POST {{url}}/info
@@ -29,7 +28,6 @@ id=1234
 ###
 GET {{url}}/genres
 ###
-# available parameters gen, cat (?), name, year
 POST {{url}}/search
 Content-Type: application/x-www-form-urlencoded
 
