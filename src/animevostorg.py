@@ -1,4 +1,18 @@
 #!/usr/bin/env python3
+try:
+    from fusepy import Operations as FuseOperations, FuseOSError, FUSE
+except ImportError:
+    from fuse import Operations as FuseOperations, FuseOSError, FUSE
+from argparse import ArgumentParser
+from typing import Iterable, List, TypeVar, Iterator
+from cachetools import cached, TTLCache
+import errno
+import os
+import stat
+import time
+import json
+import requests
+import yaml
 
 '''
 Created on Oct 30, 2018
@@ -6,14 +20,120 @@ Created on Oct 30, 2018
 @author: Dmytro Dubrovny <dubrovnyd@gmail.com>
 '''
 
-from typing import List, Iterator
-from cachetools import cached, TTLCache
-from webfs import File, Directory, Playlist, PlaylistItem, FSItem, FuseOSError
-import json
-import os
-import requests
-import toml
-import errno
+
+def sanitize_filename(filename):
+    return filename.replace('/', "\u2571")
+
+
+class File:
+
+    def __init__(self, name: str, content: str = ''):
+        self.__name = name
+        self.__content = content
+        self.attr = dict(st_atime=time.time(), st_ctime=time.time(), st_mtime=time.time(), st_gid=os.getgid(),
+                         st_uid=os.getuid(), st_mode=stat.S_IFREG | 0o444, st_nlink=1, st_size=len(self.read()))
+
+    def find(self, path: str) -> 'File':
+        if path == '':
+            return self
+        else:
+            raise FuseOSError(errno.ENOTDIR)
+
+    def read(self) -> bytes:
+        return self.__content.encode()
+
+    def __str__(self) -> str:
+        return sanitize_filename(self.__name)
+
+
+class Directory:
+
+    def __init__(self, name: str, items: Iterable['FSItem'] = ()):
+        self.__name = name
+        self.__items = items
+        self.__defaults = ['.', '..']
+        self.attr = dict(st_atime=time.time(), st_ctime=time.time(), st_mtime=time.time(), st_gid=os.getgid(),
+                         st_uid=os.getuid(), st_mode=stat.S_IFDIR | 0o555, st_nlink=1, st_size=4096)
+
+    def __iter__(self):
+        return iter(self.__items)
+
+    def find(self, path: str) -> 'FSItem':
+        if path == '':
+            return self
+
+        split = path.split(os.sep)
+        name = split.pop(0)
+        for item in self:
+            if str(item) == name:
+                item = item.find(os.sep.join(split))
+                return item
+
+        raise FuseOSError(errno.ENOENT)
+
+    def list(self) -> List[str]:
+        return self.__defaults + [str(item) for item in self]
+
+    def __str__(self) -> str:
+        return sanitize_filename(self.__name)
+
+
+FSItem = TypeVar('FSItem', File, Directory)
+
+
+class PlaylistItem:
+
+    def __init__(self, title: str, path: str, duration: int = -1):
+        self.__title = title
+        self.__path = path
+        self.__duration = duration
+
+    def __str__(self) -> str:
+        if len(self.path):
+            return '#EXTINF:{:d}, {:s}\n{:s}\n'.format(self.duration, self.title, self.path)
+        else:
+            return '\n'
+
+    @property
+    def title(self) -> str:
+        return self.__title
+
+    @property
+    def path(self) -> str:
+        return self.__path
+
+    @property
+    def duration(self) -> int:
+        return self.__duration
+
+
+class Playlist(File):
+
+    def __init__(self, name: str, items: Iterable[PlaylistItem]):
+        File.__init__(self, '{:s}.m3u8'.format(name))
+        self.__items = items
+
+    def __iter__(self):
+        return iter(self.__items)
+
+    def read(self) -> bytes:
+        return ('#EXTM3U\n' + '\n'.join(str(item) for item in self)).encode()
+
+
+class WebFS(FuseOperations):
+
+    def __init__(self, root: Directory):
+        FuseOperations.__init__(self)
+        self.root = root
+
+    def getattr(self, path: str, fh=None):
+        return self.root.find(path.lstrip(os.sep)).attr
+
+    def readdir(self, path: str, fh):
+        return self.root.find(path.lstrip(os.sep)).list()
+
+    def read(self, path: str, size, offset, fh):
+        return self.root.find(path.lstrip(os.sep)).read()
 
 
 class GetTokenError(Exception):
@@ -26,17 +146,16 @@ class GetTokenError(Exception):
 
 
 class Configuration:
-    def __init__(self, path: str, quality: str):
-        self.__api_url = None
-        self.__path = path
-        self.__quality = quality
-        if os.path.isfile(path):
-            configuration = toml.load(path)
-            configuration.setdefault('username', None)
-            configuration.setdefault('password', None)
-            self.__username = configuration['username']
-            self.__password = configuration['password']
-        self.__limit = 40
+    QUALITY_SD = 'std'
+    QUALITY_HD = 'hd'
+
+    def __init__(self, api: str = None, quality: str = None,
+                 limit: int = None, username: str = None, password: str = None):
+        self.__username = username
+        self.__password = password
+        self.__api = api or 'https://api.animetop.info/v1'
+        self.__quality = quality or self.QUALITY_HD
+        self.__limit = limit or 40
 
     @property
     def limit(self) -> int:
@@ -47,19 +166,15 @@ class Configuration:
         return self.__quality
 
     @property
-    def api_url(self) -> str:
-        if self.__api_url is not None:
-            return self.__api_url
-        # self.__api_url = 'https://api.animevost.org/v1'
-        self.__api_url = 'https://api.animetop.info/v1'
-        return self.__api_url
+    def api(self) -> str:
+        return self.__api
 
     @property
     @cached(cache=TTLCache(maxsize=128, ttl=30000))
     def token(self):
         if self.__username is None or self.__password is None:
             raise GetTokenError("Username or password is not configured")
-        page = requests.post('{:s}/gettoken'.format(self.api_url), {'user': self.__username, 'pass': self.__password})
+        page = requests.post('{:s}/gettoken'.format(self.api), {'user': self.__username, 'pass': self.__password})
         data = json.loads(page.text)
         if data['status'] == 'ok':
             return data['token']
@@ -67,7 +182,7 @@ class Configuration:
 
     @staticmethod
     def qualities() -> List[str]:
-        return ['std', 'hd']
+        return [Configuration.QUALITY_SD, Configuration.QUALITY_HD]
 
 
 class TitleFinder:
@@ -85,7 +200,7 @@ class TitleFinder:
 
     @cached(cache=TTLCache(maxsize=1024, ttl=3000))
     def __search(self) -> List[FSItem]:
-        page = requests.post('{:s}/search'.format(self.__config.api_url), self.__params)
+        page = requests.post('{:s}/search'.format(self.__config.api), self.__params)
         series = json.loads(page.text)
         series.setdefault('data', [])
         titles = [Title('{:02d} {:s}'.format(i, s['title']), s['id'], self.__config) for i, s in
@@ -141,7 +256,7 @@ class Title(Directory):
 
     @cached(cache=TTLCache(maxsize=1024, ttl=3000))
     def __items(self) -> List[FSItem]:
-        page = requests.post('{:s}/playlist'.format(self.__config.api_url), {'id': self.__title_id}, None)
+        page = requests.post('{:s}/playlist'.format(self.__config.api), {'id': self.__title_id}, None)
         series_data = json.loads(page.text)
         series = []
         for episode_data in series_data:
@@ -178,7 +293,7 @@ class Page(Directory):
     @cached(cache=TTLCache(maxsize=1024, ttl=3000))
     def __titles(self) -> List[FSItem]:
         page = requests.get(
-            '{:s}/last?page={:d}&quantity={:d}'.format(self.__config.api_url, self.__number, self.__limit))
+            '{:s}/last?page={:d}&quantity={:d}'.format(self.__config.api, self.__number, self.__limit))
         series = json.loads(page.text)
         titles = [Title('{:02d} {:s}'.format(i, s['title']), s['id'], self.__config) for i, s in
                   enumerate(series['data'], start=1)]
@@ -221,7 +336,7 @@ class Genres(Directory):
 
     @cached(cache=TTLCache(maxsize=1024, ttl=3000))
     def __genres(self):
-        page = requests.get('{:s}/genres'.format(self.__config.api_url))
+        page = requests.get('{:s}/genres'.format(self.__config.api))
         data = json.loads(page.text)
         return [genre for genre in data.values()]
 
@@ -256,7 +371,7 @@ class Favorites(Directory):
         except GetTokenError as err:
             return [File('error.txt', str(err))]
         else:
-            page = requests.post('{:s}/favorites'.format(self.__config.api_url), {'token': token})
+            page = requests.post('{:s}/favorites'.format(self.__config.api), {'token': token})
             series = json.loads(page.text)
             titles = [Title('{:02d} {:s}'.format(i, s['title']), s['id'], self.__config) for i, s in
                       enumerate(series['data'], start=1)]
@@ -275,7 +390,7 @@ class All(Directory):
 
     @cached(cache=TTLCache(maxsize=1024, ttl=3000))
     def __pages(self) -> List[FSItem]:
-        page = requests.get('{:s}/last?page=1&quantity={:d}'.format(self.__config.api_url, self.__limit))
+        page = requests.get('{:s}/last?page=1&quantity={:d}'.format(self.__config.api, self.__limit))
         series = json.loads(page.text)
         if len(series['data']) < self.__limit:
             self.__limit = len(series['data'])
@@ -301,19 +416,52 @@ class Root(Directory):
         Directory.__init__(self, '', directories)
 
 
-if __name__ == '__main__':
-    from webfs import mount, parse_options, argument_parser
+def mount(root: Directory, mountpoint: str, **kwargs):
+    kwargs.setdefault('fsname', 'www-fuse')
+    kwargs.setdefault('nothreads', True)
+    if not os.geteuid():
+        kwargs.setdefault('allow_other', True)
+    FUSE(WebFS(root), mountpoint, **kwargs)
 
-    parser = argument_parser()
+
+if __name__ == '__main__':
+    parser: ArgumentParser = ArgumentParser()
+    parser.add_argument('-i', '--interactive', help='Start in interactive mode', action='store_true')
+    parser.add_argument('-o', '--options', help='Mount options', default='')
     parser.add_argument('quality', type=str, help='Video quality', choices=Configuration.qualities())
     parser.add_argument('path', type=str, help='Target path')
-    parser.add_argument('-c', '--configuration', type=str, help='Path to config file', default='')
+
+    parser.add_argument('-c', '--config', help='Path to configuration file', default='~/.animevost.yaml')
+    parser.add_argument('-a', '--api', help='API URL', default='https://api.animetop.info/v1')
+    parser.add_argument('-l', '--limit', help='Per directory limit', default=40)
+    parser.add_argument('-u', '--username', help='Username', default=None)
+    parser.add_argument('-p', '--password', help='Password', default=None)
 
     arguments = parser.parse_args()
-    options = parse_options(arguments)
-    options.setdefault('fsname', 'doc.org-{:s}-fuse'.format(arguments.quality))
-    options.setdefault('conf', arguments.configuration)
-    conf = Configuration(options['conf'], arguments.quality)
-    del options['conf']
+    options = {}
+    for option in arguments.options.split(','):
+        try:
+            (name, value) = option.split('=')
+        except ValueError:
+            (name, value) = option, True
+        options[name] = value
+    options.setdefault('foreground', arguments.interactive)
+    options.setdefault('fsname', 'animevostorg-{:s}-fuse'.format(arguments.quality))
+    try:
+        configfile = os.path.expanduser(options.setdefault('config', arguments.config))
+        with open(configfile, "r") as stream:
+            config = yaml.load(stream, Loader=yaml.BaseLoader)
+    except FileNotFoundError:
+        config = dict()
+    finally:
+        del options['config']
 
-    mount(Root(conf), arguments.path, **options)
+    configuration = Configuration(
+        username=config.get('username', False) or arguments.username,
+        password=config.get('password', False) or arguments.password,
+        quality=config.get('quality', False) or arguments.quality,
+        limit=config.get('limit', False) or arguments.limit,
+        api=config.get('api', False) or arguments.api
+    )
+
+    mount(Root(configuration), arguments.path, **options)
